@@ -1,11 +1,10 @@
 import { MusicAccount, MusicProviderName } from '@prisma/client';
-import { getEnv } from '../config/env';
 import { prisma } from '../config/prisma';
 import { fromPrismaProvider, getProvider, toPrismaProvider } from '../providers/ProviderRegistry';
 import { isNonRetryableProviderError } from '../providers/youtube/youtubeErrors';
 import { TokenExpiredError, TokenInvalidError } from '../types/errors';
 import type { ProviderId, ProviderTokens, ProviderUser } from '../types/provider';
-import { decryptSecret, encryptSecret } from '../utils/crypto';
+import { TokenEncryptionService } from './TokenEncryptionService';
 
 export interface StoredAccount {
   id: string;
@@ -17,14 +16,20 @@ export interface StoredAccount {
 }
 
 function encrypt(value: string): string {
-  return encryptSecret(value, getEnv().TOKEN_ENCRYPTION_KEY);
+  return TokenEncryptionService.encrypt(value);
 }
 
 function decrypt(value: string): string {
-  return decryptSecret(value, getEnv().TOKEN_ENCRYPTION_KEY);
+  return TokenEncryptionService.decrypt(value);
 }
 
-export function toPublicAccount(account: MusicAccount): {
+export function toPublicAccount(account: {
+  provider: MusicProviderName;
+  providerUserId: string;
+  displayName: string | null;
+  imageUrl: string | null;
+  expiresAt: Date | null;
+}): {
   provider: ProviderId;
   providerUserId: string;
   connected: true;

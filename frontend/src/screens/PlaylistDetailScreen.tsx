@@ -1,9 +1,9 @@
 import { useLocalSearchParams, router } from 'expo-router';
-import { Image, StyleSheet, Text, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { StyleSheet, Text, View } from 'react-native';
 import { useState } from 'react';
 import { AppButton } from '@/components/AppButton';
 import { AppInput } from '@/components/AppInput';
+import { Artwork } from '@/components/Artwork';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
@@ -38,13 +38,7 @@ export function PlaylistDetailScreen() {
       ) : null}
       {playlist ? (
         <>
-          {playlist.coverImageUrl ? (
-            <Image source={{ uri: playlist.coverImageUrl }} style={styles.cover} accessibilityIgnoresInvertColors />
-          ) : (
-            <View style={[styles.cover, styles.coverFallback, { backgroundColor: colors.card }]}>
-              <Ionicons name="albums" size={48} color={colors.accent} />
-            </View>
-          )}
+          <Artwork uri={playlist.coverImageUrl} style={styles.cover} accessibilityLabel={`${playlist.name} cover`} />
           {editing ? (
             <>
               <AppInput label="Name" value={name} onChangeText={setName} />
@@ -158,10 +152,6 @@ const styles = StyleSheet.create({
     width: '100%',
     height: 220,
     borderRadius: 24,
-  },
-  coverFallback: {
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   name: {
     fontSize: 26,

@@ -17,13 +17,14 @@ export async function createSession(displayName?: string): Promise<{ token: stri
 
 export function signSession(userId: string): string {
   return jwt.sign({ sub: userId } satisfies SessionClaims, getEnv().JWT_SECRET, {
+    algorithm: 'HS256',
     expiresIn: '30d',
   });
 }
 
 export async function verifySession(token: string): Promise<string> {
   try {
-    const payload = jwt.verify(token, getEnv().JWT_SECRET) as SessionClaims;
+    const payload = jwt.verify(token, getEnv().JWT_SECRET, { algorithms: ['HS256'] }) as SessionClaims;
     if (!payload.sub) {
       throw new TokenInvalidError('Your MusicMix session is invalid. Please restart the app.');
     }

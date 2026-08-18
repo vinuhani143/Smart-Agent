@@ -1,11 +1,12 @@
 type LogLevel = 'info' | 'warn' | 'error';
 
-const SECRET_KEYS = /token|secret|password|authorization|cookie|key|refresh|bearer|client_id|client_secret|x-api-key|securityprofile/i;
+const SECRET_KEYS = /token|secret|password|authorization|cookie|refresh|bearer|client_secret|x-api-key|securityprofile|code_verifier|authorization_code|private_key|api_key|database_url/i;
+
+export function redactLogMeta(value: unknown): unknown {
+  return redact(value);
+}
 
 function redact(value: unknown): unknown {
-  if (typeof value === 'string') {
-    return value.length > 0 ? '[redacted]' : value;
-  }
   if (Array.isArray(value)) {
     return value.map(redact);
   }

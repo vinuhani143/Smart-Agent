@@ -42,8 +42,8 @@ Security controls:
 - Rate limiting (stricter on auth)
 - Zod validation
 - httpOnly session cookie (web) + `Authorization: Bearer` (mobile)
-- AES-256-GCM encryption for provider tokens at rest
-- Structured logs that redact token/secret fields
+- AES-256-GCM encryption for provider tokens at rest via `TokenEncryptionService` (`TokenService` does not implement its own cipher)
+- Structured logs that redact token/secret **field names** (request path, status, and request id remain visible)
 
 ## Database
 

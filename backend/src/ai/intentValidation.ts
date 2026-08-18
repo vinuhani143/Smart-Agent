@@ -23,8 +23,8 @@ export function validateIntent(intent: PlaylistIntent, prompt: string): Playlist
   if (intent.durationMinutes !== undefined && (intent.durationMinutes < 1 || intent.durationMinutes > 600)) {
     throw new AppError(ErrorCode.VALIDATION_ERROR, 'Duration must be between 1 and 600 minutes.', 400);
   }
-  if (intent.maxTracks !== undefined && (intent.maxTracks < 1 || intent.maxTracks > 100)) {
-    throw new AppError(ErrorCode.VALIDATION_ERROR, 'Track count must be between 1 and 100.', 400);
+  if (intent.maxTracks !== undefined && (intent.maxTracks < 1 || intent.maxTracks > 50)) {
+    throw new AppError(ErrorCode.VALIDATION_ERROR, 'Track count must be between 1 and 50.', 400);
   }
 
   const hasSignal =

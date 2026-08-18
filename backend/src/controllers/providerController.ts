@@ -17,6 +17,14 @@ export async function getProviders(req: Request, res: Response): Promise<void> {
   const accounts = userId
     ? await prisma.musicAccount.findMany({
         where: { userId },
+        select: {
+          provider: true,
+          providerUserId: true,
+          displayName: true,
+          imageUrl: true,
+          expiresAt: true,
+          subscriptionTier: true,
+        },
       })
     : [];
   const connected = new Map(accounts.map((account) => [fromPrismaProvider(account.provider), toPublicAccount(account)]));

@@ -3,10 +3,22 @@ node_modules/
 
 # Environment and secrets — never commit real credentials
 .env
-.env.local
-.env.*.local
-**/.env
+.env.*
+!.env.example
+!.env.production.example
 !**/.env.example
+!**/.env.production.example
+
+# Credential / key material
+*.pem
+*.key
+*.p8
+*.p12
+*.jks
+credentials.json
+**/credentials*.json
+google-services.json
+GoogleService-Info.plist
 
 # Build outputs
 dist/
@@ -24,10 +36,6 @@ prisma/*.db-journal
 ios/
 android/
 .kotlin/
-*.jks
-*.p8
-*.p12
-*.key
 *.mobileprovision
 *.orig.*
 
@@ -40,7 +48,6 @@ yarn-error.*
 
 # OS / editor
 .DS_Store
-*.pem
 .idea/
 .vscode/
 !.frontend/.vscode/

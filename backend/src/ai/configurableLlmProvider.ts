@@ -118,15 +118,23 @@ function extractJsonObject(text: string): Record<string, unknown> {
 }
 
 async function postJson(url: string, headers: Record<string, string>, body: unknown): Promise<unknown> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20_000);
   let response: Response;
   try {
     response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...headers },
       body: JSON.stringify(body),
+      signal: controller.signal,
     });
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new AiUnavailableError('The AI service took too long to respond.');
+    }
     throw new AiUnavailableError('Could not reach the AI provider. Check the network and AI_BASE_URL.');
+  } finally {
+    clearTimeout(timeout);
   }
 
   const json: unknown = await response.json().catch(() => null);

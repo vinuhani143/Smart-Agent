@@ -1,5 +1,5 @@
-import { Ionicons } from '@expo/vector-icons';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Artwork } from '@/components/Artwork';
 import { ProviderBadge } from '@/components/ProviderBadge';
 import { useAppTheme } from '@/theme/AppThemeProvider';
 import type { PlaylistSummary, ProviderId } from '@/types';
@@ -41,13 +41,7 @@ export function PlaylistCard({ playlist, onPress, onEdit, onConvert, onDelete }:
         pressed && { opacity: 0.88 },
       ]}
     >
-      {playlist.coverImageUrl ? (
-        <Image source={{ uri: playlist.coverImageUrl }} style={styles.cover} accessibilityIgnoresInvertColors />
-      ) : (
-        <View style={[styles.cover, styles.coverFallback, { backgroundColor: colors.elevated }]}>
-          <Ionicons name="albums" size={28} color={colors.accent} />
-        </View>
-      )}
+      <Artwork uri={playlist.coverImageUrl} style={styles.cover} accessibilityLabel={`${playlist.name} cover`} />
       <View style={styles.copy}>
         <Text style={[styles.name, { color: colors.text }]} numberOfLines={1}>
           {playlist.name}
@@ -95,10 +89,6 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 12,
-  },
-  coverFallback: {
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   copy: {
     flex: 1,

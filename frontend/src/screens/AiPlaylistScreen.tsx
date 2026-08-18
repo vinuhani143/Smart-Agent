@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Switch } from 'react-native-paper';
 import { router, useLocalSearchParams } from 'expo-router';
 import { AppButton } from '@/components/AppButton';
 import { AppCard } from '@/components/AppCard';
 import { AppInput } from '@/components/AppInput';
+import { Artwork } from '@/components/Artwork';
 import { Chip } from '@/components/Chip';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorBanner } from '@/components/ErrorBanner';
@@ -385,13 +386,7 @@ export function AiPlaylistScreen() {
 
       {view ? (
         <AppCard>
-          {coverUrl ? (
-            <Image source={{ uri: coverUrl }} style={styles.cover} accessibilityIgnoresInvertColors accessibilityLabel="Playlist cover" />
-          ) : (
-            <View style={[styles.cover, styles.coverFallback, { backgroundColor: colors.elevated }]}>
-              <Text style={{ fontSize: 36 }}>🤖</Text>
-            </View>
-          )}
+          <Artwork uri={coverUrl} style={styles.cover} accessibilityLabel="Playlist cover" />
           <AppInput label="Generated title" value={title} onChangeText={setTitle} />
           <AppInput label="Description" value={description} onChangeText={setDescription} multiline />
           <Text style={[styles.meta, { color: colors.cyan }]}>
@@ -513,9 +508,5 @@ const styles = StyleSheet.create({
     width: '100%',
     height: 160,
     borderRadius: 16,
-  },
-  coverFallback: {
-    alignItems: 'center',
-    justifyContent: 'center',
   },
 });

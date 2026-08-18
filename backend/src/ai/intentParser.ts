@@ -302,5 +302,10 @@ export function applyIntentHints(base: PlaylistIntent, hints?: Partial<PlaylistI
 }
 
 export function isUnsafePlaylistPrompt(prompt: string): boolean {
-  return /\b(download|rip(?:ping)?|torrent|pirated?|crack(?:ed)?)\b/i.test(prompt);
+  return (
+    /\b(download|rip(?:ping)?|torrent|pirated?|crack(?:ed)?)\b/i.test(prompt) ||
+    /\b(ignore (all )?(previous|prior) (instructions|prompts)|system prompt|you are now)\b/i.test(prompt) ||
+    /\b(drop table|insert into|union select|xp_cmdshell|;--)\b/i.test(prompt) ||
+    /\b(eval\s*\(|new Function\s*\(|<script|javascript:)\b/i.test(prompt)
+  );
 }

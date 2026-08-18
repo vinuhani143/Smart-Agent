@@ -27,5 +27,5 @@ aiRouter.put('/playlists/:id', requireAuth, validateBody(updateAiPlaylistSchema)
 aiRouter.post('/playlists/:id/replace', requireAuth, validateBody(replaceAiTrackSchema), replaceAiPlaylistTrack);
 aiRouter.post('/playlists/:id/create', requireAuth, validateBody(createAiPlaylistSchema), createAiPlaylist);
 
-aiRouter.post('/generate-playlist', requireAuth, validateBody(legacyGeneratePlaylistSchema), generatePlaylist);
+aiRouter.post('/generate-playlist', requireAuth, aiGenerateLimiter, validateBody(legacyGeneratePlaylistSchema), generatePlaylist);
 aiRouter.post('/generate-playlist/:requestId/confirm', requireAuth, confirmGeneratedPlaylist);

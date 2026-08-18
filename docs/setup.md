@@ -43,6 +43,8 @@ cp .env.example backend/.env
 cp frontend/.env.example frontend/.env
 ```
 
+Production hosts should copy `.env.production.example` and `frontend/.env.production.example` into a secret manager instead. Those files contain placeholders only.
+
 Generate secrets (do not commit them):
 
 ```bash

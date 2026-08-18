@@ -7,53 +7,41 @@ import {
   createConvertedPlaylist,
   getConversion,
 } from '../services/ConversionService';
+import { oncePerKey } from '../utils/inFlight';
 import type { TrackResult } from '../types/provider';
+import { providerIdSchema, trackResultSchema } from '../validation/schemas';
 
-const providerEnum = z.enum(['spotify', 'youtube']);
+export const analyzeConversionSchema = z
+  .object({
+    sourceProvider: providerIdSchema,
+    sourcePlaylistId: z.string().min(1).max(128),
+    destinationProvider: providerIdSchema,
+    allowSameProvider: z.boolean().optional(),
+  })
+  .strict();
 
-const trackResultSchema = z.object({
-  provider: z.enum(['spotify', 'youtube', 'amazon_music']),
-  providerTrackId: z.string().min(1),
-  title: z.string().min(1),
-  artist: z.string().min(1),
-  album: z.string().optional(),
-  durationMs: z.number().int().optional(),
-  releaseDate: z.string().optional(),
-  isrc: z.string().optional(),
-  thumbnailUrl: z.string().optional(),
-  explicit: z.boolean().optional(),
-  originalTitle: z.string().optional(),
-  metadataConfidence: z.number().optional(),
-  parsedTitle: z.string().optional(),
-  parsedArtist: z.string().optional(),
-  youtubeVideoId: z.string().optional(),
-  spotifyId: z.string().optional(),
-});
+export const confirmConversionSchema = z
+  .object({
+    acceptAllHighConfidence: z.boolean().optional(),
+    decisions: z
+      .array(
+        z.object({
+          sourceTrackId: z.string().min(1).max(256),
+          action: z.enum(['accept', 'skip', 'select_alternative', 'manual']),
+          destinationTrack: trackResultSchema.optional(),
+        }),
+      )
+      .max(500)
+      .optional(),
+  })
+  .strict();
 
-export const analyzeConversionSchema = z.object({
-  sourceProvider: providerEnum,
-  sourcePlaylistId: z.string().min(1),
-  destinationProvider: providerEnum,
-  allowSameProvider: z.boolean().optional(),
-});
-
-export const confirmConversionSchema = z.object({
-  acceptAllHighConfidence: z.boolean().optional(),
-  decisions: z
-    .array(
-      z.object({
-        sourceTrackId: z.string().min(1),
-        action: z.enum(['accept', 'skip', 'select_alternative', 'manual']),
-        destinationTrack: trackResultSchema.optional(),
-      }),
-    )
-    .optional(),
-});
-
-export const createConversionSchema = z.object({
-  name: z.string().min(1).max(150).optional(),
-  description: z.string().max(5000).optional(),
-});
+export const createConversionSchema = z
+  .object({
+    name: z.string().min(1).max(150).optional(),
+    description: z.string().max(5000).optional(),
+  })
+  .strict();
 
 export async function analyze(req: Request, res: Response): Promise<void> {
   const body = analyzeConversionSchema.parse(req.body);
@@ -86,6 +74,8 @@ export async function confirm(req: Request, res: Response): Promise<void> {
 
 export async function create(req: Request, res: Response): Promise<void> {
   const body = createConversionSchema.parse(req.body ?? {});
-  const result = await createConvertedPlaylist(req.userId!, String(req.params.id), body);
+  const result = await oncePerKey(`conversion:create:${req.userId}:${String(req.params.id)}`, () =>
+    createConvertedPlaylist(req.userId!, String(req.params.id), body),
+  );
   res.json(result);
 }

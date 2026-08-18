@@ -4,71 +4,63 @@ import { PlaylistGeneratorService } from '../ai/playlistGeneratorService';
 import { describeAiConfig } from '../ai/configurableLlmProvider';
 import { AppError, ErrorCode } from '../types/errors';
 import type { TrackResult } from '../types/provider';
+import { oncePerKey } from '../utils/inFlight';
+import { providerIdSchema, searchProviderSchema, trackResultSchema } from '../validation/schemas';
 
-export const generateAiPlaylistSchema = z.object({
-  prompt: z.string().min(3).max(1000),
-  provider: z.enum(['spotify', 'youtube', 'amazon_music', 'both']).optional(),
-  destinationProvider: z.enum(['spotify', 'youtube', 'amazon_music']).optional(),
-  language: z.string().max(80).optional(),
-  mood: z.string().max(80).optional(),
-  genre: z.string().max(80).optional(),
-  theme: z.string().max(80).optional(),
-  artist: z.string().max(120).optional(),
-  yearFrom: z.number().int().min(1900).max(2100).optional(),
-  yearTo: z.number().int().min(1900).max(2100).optional(),
-  durationMinutes: z.number().int().min(1).max(600).optional(),
-  maxTracks: z.number().int().min(1).max(100).optional(),
-  allowDuplicates: z.boolean().optional(),
-  explicitContent: z.boolean().optional(),
-});
+export const generateAiPlaylistSchema = z
+  .object({
+    prompt: z.string().min(3).max(1000),
+    provider: searchProviderSchema.optional(),
+    destinationProvider: providerIdSchema.optional(),
+    language: z.string().max(80).optional(),
+    mood: z.string().max(80).optional(),
+    genre: z.string().max(80).optional(),
+    theme: z.string().max(80).optional(),
+    artist: z.string().max(120).optional(),
+    yearFrom: z.number().int().min(1900).max(2100).optional(),
+    yearTo: z.number().int().min(1900).max(2100).optional(),
+    durationMinutes: z.number().int().min(1).max(600).optional(),
+    maxTracks: z.number().int().min(1).max(50).optional(),
+    allowDuplicates: z.boolean().optional(),
+    explicitContent: z.boolean().optional(),
+  })
+  .strict();
 
-export const updateAiPlaylistSchema = z.object({
-  title: z.string().max(120).optional(),
-  description: z.string().max(500).optional(),
-  trackIds: z.array(z.string().min(1)).max(100).optional(),
-  addTrack: z
-    .object({
-      provider: z.enum(['spotify', 'youtube', 'amazon_music']),
-      providerTrackId: z.string().min(1),
-      title: z.string().min(1),
-      artist: z.string().min(1),
-      album: z.string().optional(),
-      durationMs: z.number().int().optional(),
-      releaseDate: z.string().optional(),
-      isrc: z.string().optional(),
-      thumbnailUrl: z.string().optional(),
-      explicit: z.boolean().optional(),
-      originalTitle: z.string().optional(),
-      metadataConfidence: z.number().optional(),
-      parsedTitle: z.string().optional(),
-      parsedArtist: z.string().optional(),
-      youtubeVideoId: z.string().optional(),
-      spotifyId: z.string().optional(),
-      amazonMusicId: z.string().optional(),
-    })
-    .optional(),
-});
+export const updateAiPlaylistSchema = z
+  .object({
+    title: z.string().max(120).optional(),
+    description: z.string().max(500).optional(),
+    trackIds: z.array(z.string().min(1).max(256)).max(100).optional(),
+    addTrack: trackResultSchema.optional(),
+  })
+  .strict();
 
-export const createAiPlaylistSchema = z.object({
-  destinationProvider: z.enum(['spotify', 'youtube', 'amazon_music']).optional(),
-});
+export const createAiPlaylistSchema = z
+  .object({
+    destinationProvider: providerIdSchema.optional(),
+  })
+  .strict();
 
-export const replaceAiTrackSchema = z.object({
-  provider: z.enum(['spotify', 'youtube', 'amazon_music']),
-  providerTrackId: z.string().min(1),
-});
+export const replaceAiTrackSchema = z
+  .object({
+    provider: providerIdSchema,
+    providerTrackId: z.string().min(1).max(128),
+  })
+  .strict();
 
-export const legacyGeneratePlaylistSchema = z.object({
-  prompt: z.string().max(1000).optional(),
-  language: z.string().max(80).optional(),
-  mood: z.string().max(80).optional(),
-  genre: z.string().max(80).optional(),
-  yearFrom: z.number().int().min(1900).max(2100).optional(),
-  yearTo: z.number().int().min(1900).max(2100).optional(),
-  durationMinutes: z.number().int().min(1).max(600).optional(),
-  allowDuplicates: z.boolean().optional(),
-  targetProvider: z.enum(['spotify', 'youtube', 'amazon_music']).optional(),
-});
+export const legacyGeneratePlaylistSchema = z
+  .object({
+    prompt: z.string().max(1000).optional(),
+    language: z.string().max(80).optional(),
+    mood: z.string().max(80).optional(),
+    genre: z.string().max(80).optional(),
+    yearFrom: z.number().int().min(1900).max(2100).optional(),
+    yearTo: z.number().int().min(1900).max(2100).optional(),
+    durationMinutes: z.number().int().min(1).max(600).optional(),
+    allowDuplicates: z.boolean().optional(),
+    targetProvider: providerIdSchema.optional(),
+  })
+  .strict();
 
 function promptFromLegacy(body: z.infer<typeof legacyGeneratePlaylistSchema>): string {
   if (body.prompt && body.prompt.trim().length >= 3) {
@@ -85,7 +77,9 @@ function promptFromLegacy(body: z.infer<typeof legacyGeneratePlaylistSchema>): s
 
 export async function generateAiPlaylist(req: Request, res: Response): Promise<void> {
   const input = generateAiPlaylistSchema.parse(req.body);
-  const view = await PlaylistGeneratorService.generate(req.userId!, input);
+  const view = await oncePerKey(`ai:generate:${req.userId}:${input.prompt}`, () =>
+    PlaylistGeneratorService.generate(req.userId!, input),
+  );
   res.json(view);
 }
 
@@ -117,10 +111,8 @@ export async function replaceAiPlaylistTrack(req: Request, res: Response): Promi
 
 export async function createAiPlaylist(req: Request, res: Response): Promise<void> {
   const body = createAiPlaylistSchema.parse(req.body ?? {});
-  const result = await PlaylistGeneratorService.createOnProvider(
-    req.userId!,
-    String(req.params.id),
-    body.destinationProvider,
+  const result = await oncePerKey(`ai:create:${req.userId}:${String(req.params.id)}`, () =>
+    PlaylistGeneratorService.createOnProvider(req.userId!, String(req.params.id), body.destinationProvider),
   );
   res.json(result);
 }

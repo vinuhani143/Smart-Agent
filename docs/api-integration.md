@@ -123,8 +123,13 @@ When Amazon access exists, set:
 | `GET` | `/api/conversions/:id` | Conversion job + match results + summary |
 | `POST` | `/api/conversions/:id/confirm` | Save accept / skip / alternative / manual decisions |
 | `POST` | `/api/conversions/:id/create` | Create destination playlist from confirmed matches only |
-| `POST` | `/api/ai/generate-playlist` | Candidate tracks only |
-| `POST` | `/api/ai/generate-playlist/:requestId/confirm` | Save after user review |
+| `POST` | `/api/ai/playlists/generate` | Parse prompt, search catalogs, return preview (never creates) |
+| `GET` | `/api/ai/playlists/:id` | Load a generation job |
+| `PUT` | `/api/ai/playlists/:id` | User edits (title, order, remove, add) |
+| `POST` | `/api/ai/playlists/:id/replace` | Replace one preview track via provider search |
+| `POST` | `/api/ai/playlists/:id/create` | Create on Spotify/YouTube after explicit confirm |
+| `POST` | `/api/ai/generate-playlist` | Legacy generate (same engine) |
+| `POST` | `/api/ai/generate-playlist/:requestId/confirm` | Legacy confirm/create |
 
 ## Cross-platform playlist conversion
 
@@ -168,8 +173,49 @@ Track matching runs with **concurrency 3**. Each search retries transient `429` 
 
 If destination playlist creation fails part-way, MusicMix stores `destinationPlaylistId` and returns *“Playlist created with X of Y tracks.”* Retrying `POST /create` adds remaining tracks to the **same** playlist and does not create a second one.
 
+## AI playlist generation
+
+The LLM **does not produce audio**. It extracts `PlaylistIntent`, may re-rank catalog hits, and writes a title/description. Songs always come from official Spotify Web API / YouTube Data API v3 search through the provider adapters.
+
+### Environment (backend only)
+
+| Variable | Required | Notes |
+| --- | --- | --- |
+| `AI_PROVIDER` | yes | `openai`, `anthropic`, or `openai-compatible` |
+| `AI_API_KEY` | yes | Never shipped in the Expo app |
+| `AI_MODEL` | yes | Provider model id |
+| `AI_BASE_URL` | openai-compatible | Chat Completions-compatible root |
+
+If any required value is missing, generate returns HTTP 503 `AI_UNAVAILABLE` with a setup message. MusicMix does not invent tracks or fake an LLM response.
+
+### Flow
+
+1. `POST /api/ai/playlists/generate` `{ "prompt": "...", "provider": "spotify"|"youtube"|"both" }`
+2. LLM parse → validate → up to 6 adapter searches (concurrency 2)
+3. Normalize, de-duplicate, filter (explicit/year when metadata is reliable), weighted score 0–100
+4. Fill duration to about ±2 minutes of the target
+5. Return `{ generationId, intent, playlist, summary }` with `confirmationRequired: true`
+6. User edits via `PUT` (remove / reorder / add) or replace via `POST .../replace`
+7. `POST /api/ai/playlists/:id/create` `{ "destinationProvider": "spotify"|"youtube" }` creates the remote playlist
+
+If fewer suitable songs exist than requested, `summary.warning` is `Only X suitable songs were found.` Extra songs are never fabricated.
+
+### Track ranking
+
+Weighted evidence: language, genre, mood, year, artist, metadata confidence, provider availability. A track is not labeled a perfect match unless the available fields support a 100 score. Energy and tempo stay `unknown` because Spotify/YouTube search results do not reliably include BPM.
+
+### Search strategy and rate limits
+
+Queries are derived from language/mood/genre/year/artist (for example `Telugu romantic songs`, `Telugu melody 2000`). Cap: 6 queries. Provider calls use the existing retry helper for transient 429s. YouTube `quotaExceeded` is not retried. Generate itself is limited to 20 requests / 15 minutes per client.
+
+### Privacy
+
+- `AI_API_KEY`, Spotify/Google secrets, and refresh tokens never leave the server and are not in API responses.
+- The user prompt is sent to the configured LLM provider and stored in `PlaylistGeneration.requestText`.
+- Preview artwork URLs come from the music providers, not from generated media.
+
 ## Errors the client can show
 
-Human-readable messages are mapped for: OAuth failure, OAuth cancellation, expired/invalid token, refresh failure, YouTube quota exceeded, 403 permission errors, 404/private/deleted videos, rate limit, network error, no search results, duplicate track, track unavailable on destination, insufficient permissions, provider unavailable, reorder not supported, source playlist unavailable, conversion not confirmed, partial playlist creation.
+Human-readable messages are mapped for: OAuth failure, OAuth cancellation, expired/invalid token, refresh failure, YouTube quota exceeded, 403 permission errors, 404/private/deleted videos, rate limit, network error, no search results, duplicate track, track unavailable on destination, insufficient permissions, provider unavailable, reorder not supported, source playlist unavailable, conversion not confirmed, partial playlist creation, AI provider missing/unavailable/rate-limited.
 
 Responses never include client secrets, refresh tokens, access tokens, or `DATABASE_URL`.

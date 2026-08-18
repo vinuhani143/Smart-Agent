@@ -148,6 +148,23 @@ Or a release APK after `eas build` / local Gradle assemble. Set `EXPO_PUBLIC_API
 
 Amazon Music remains disabled until Amazon grants official API credentials. Do not invent keys.
 
+## 11. Configure an AI provider (playlist generation)
+
+AI playlist generation calls a real LLM **on the backend** to parse the request, rank search results, and write a title/description. It does **not** generate audio. If credentials are missing, `POST /api/ai/playlists/generate` returns a setup error instead of a fake playlist.
+
+Set these **backend** variables only (never `EXPO_PUBLIC_*`):
+
+| Variable | Purpose |
+| --- | --- |
+| `AI_PROVIDER` | `openai`, `anthropic`, or `openai-compatible` |
+| `AI_API_KEY` | Provider secret |
+| `AI_MODEL` | Model id (for example `gpt-4.1-mini` or `claude-sonnet-4-5`) |
+| `AI_BASE_URL` | Required for `openai-compatible`. Optional override for OpenAI/Anthropic |
+
+Obtain a key from [OpenAI](https://platform.openai.com/api-keys), [Anthropic](https://console.anthropic.com/), or another OpenAI-compatible chat-completions endpoint. Restart the API after changing env vars.
+
+User prompts are sent to that provider. MusicMix stores the prompt and parsed intent in PostgreSQL (`PlaylistGeneration`) for history/debug. OAuth secrets and `AI_API_KEY` are never returned to the app.
+
 ## Convert a playlist
 
 1. Connect **both** Spotify and YouTube in Settings.

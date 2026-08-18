@@ -77,15 +77,72 @@ export interface SearchFilters {
 }
 
 export interface GeneratePlaylistPayload {
-  prompt?: string;
+  prompt: string;
+  provider?: 'spotify' | 'youtube' | 'both';
+  destinationProvider?: 'spotify' | 'youtube';
   language?: string;
   mood?: string;
   genre?: string;
+  artist?: string;
   yearFrom?: number;
   yearTo?: number;
   durationMinutes?: number;
+  maxTracks?: number;
   allowDuplicates?: boolean;
-  targetProvider?: ProviderId;
+  explicitContent?: boolean;
+}
+
+export interface PlaylistIntent {
+  language?: string;
+  genre?: string;
+  mood?: string;
+  theme?: string;
+  artist?: string;
+  yearFrom?: number;
+  yearTo?: number;
+  durationMinutes?: number;
+  maxTracks?: number;
+  allowDuplicates?: boolean;
+  explicitContent?: boolean;
+  energyLevel?: 'low' | 'medium' | 'high';
+  tempo?: 'slow' | 'medium' | 'fast';
+  sourceProvider?: 'spotify' | 'youtube' | 'both';
+  destinationProvider?: 'spotify' | 'youtube';
+}
+
+export interface GeneratedTrack extends TrackResult {
+  trackScore: number;
+  metadataFlags?: {
+    language: 'known' | 'unknown';
+    genre: 'known' | 'unknown';
+    mood: 'known' | 'unknown';
+    year: 'known' | 'unknown';
+    explicit: 'known' | 'unknown';
+    energy: 'known' | 'unknown';
+    tempo: 'known' | 'unknown';
+  };
+}
+
+export interface PlaylistGenerationView {
+  generationId: string;
+  intent: PlaylistIntent;
+  playlist: {
+    title: string;
+    description: string;
+    tracks: GeneratedTrack[];
+  };
+  summary: {
+    targetDurationMinutes: number | null;
+    actualDurationMinutes: number;
+    trackCount: number;
+    warning: string | null;
+    orderingNote: string | null;
+    searchQueries: string[];
+    sourceProvider: 'spotify' | 'youtube' | 'both';
+    destinationProvider: 'spotify' | 'youtube' | null;
+  };
+  status: string;
+  confirmationRequired: true;
 }
 
 export type ConvertibleProvider = 'spotify' | 'youtube';

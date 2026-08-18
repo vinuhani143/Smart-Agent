@@ -10,6 +10,9 @@ interface TrackCardProps {
   onAdd?: () => void;
   onRemove?: () => void;
   onSelect?: () => void;
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
+  onReplace?: () => void;
   selected?: boolean;
   confidence?: number;
   actionLabel?: string;
@@ -20,6 +23,9 @@ export function TrackCard({
   onAdd,
   onRemove,
   onSelect,
+  onMoveUp,
+  onMoveDown,
+  onReplace,
   selected,
   confidence,
   actionLabel,
@@ -47,10 +53,10 @@ export function TrackCard({
           {track.artist}
         </Text>
         <Text style={styles.meta} numberOfLines={1}>
-          {[formatDuration(track.durationMs), meta.label].filter(Boolean).join(' · ')}
+          {[track.album, formatDuration(track.durationMs), meta.label].filter(Boolean).join(' · ')}
         </Text>
         {confidence !== undefined ? (
-          <Text style={styles.confidence}>Match confidence: {confidence}%</Text>
+          <Text style={styles.confidence}>Match score: {confidence}/100</Text>
         ) : null}
         {track.metadataConfidence !== undefined && track.metadataConfidence < 80 ? (
           <Text style={styles.confidence}>Title/artist confidence: {track.metadataConfidence}%</Text>
@@ -59,6 +65,21 @@ export function TrackCard({
       </View>
       <View style={styles.actions}>
         <MaterialCommunityIcons name={meta.icon} size={18} color={meta.color} />
+        {onMoveUp ? (
+          <Pressable onPress={onMoveUp} style={styles.round}>
+            <Ionicons name="arrow-up" size={16} color={colors.text} />
+          </Pressable>
+        ) : null}
+        {onMoveDown ? (
+          <Pressable onPress={onMoveDown} style={styles.round}>
+            <Ionicons name="arrow-down" size={16} color={colors.text} />
+          </Pressable>
+        ) : null}
+        {onReplace ? (
+          <Pressable onPress={onReplace} style={styles.round}>
+            <Ionicons name="swap-horizontal" size={16} color={colors.text} />
+          </Pressable>
+        ) : null}
         {onAdd ? (
           <Pressable onPress={onAdd} style={styles.round}>
             <Ionicons name="add" size={20} color={colors.text} />

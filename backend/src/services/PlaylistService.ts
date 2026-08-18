@@ -69,19 +69,32 @@ export async function createLocalPlaylist(userId: string, input: CreateLocalPlay
         'Amazon Music is not available. Official API access is not configured.',
       );
     }
-    const adapter = getProvider(input.targetProvider);
-    const remote = await withProviderTokens(userId, input.targetProvider, async (tokens) => {
+    const targetProvider = input.targetProvider;
+    const adapter = getProvider(targetProvider);
+    const remote = await withProviderTokens(userId, targetProvider, async (tokens) => {
       const created = await adapter.createPlaylist(tokens, {
         name: input.name,
         description: input.description,
       });
-      const youtubeIds = uniqueTracks
-        .map((track) =>
-          track.youtubeVideoId ?? (track.provider === 'youtube' ? track.providerTrackId : undefined),
-        )
-        .filter((id): id is string => Boolean(id));
-      if (youtubeIds.length > 0 && input.targetProvider === 'youtube') {
-        await adapter.addTracksToPlaylist(tokens, created.providerPlaylistId, youtubeIds);
+      const remoteIds: string[] = [];
+      for (const track of uniqueTracks) {
+        const nativeId = remoteTrackIdForProvider(targetProvider, track);
+        if (nativeId) {
+          remoteIds.push(nativeId);
+          continue;
+        }
+        const query = `${track.title} ${track.artist}`.trim();
+        if (!query) {
+          continue;
+        }
+        const candidates = await adapter.searchTracks(tokens, { query, limit: 5 });
+        const decision = matchTrack(track, candidates);
+        if (decision.best && !decision.best.needsReview) {
+          remoteIds.push(decision.best.track.providerTrackId);
+        }
+      }
+      if (remoteIds.length > 0) {
+        await adapter.addTracksToPlaylist(tokens, created.providerPlaylistId, remoteIds);
       }
       return created;
     });

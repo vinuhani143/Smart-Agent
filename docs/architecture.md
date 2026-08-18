@@ -17,7 +17,8 @@ Routes:
 - `app/(tabs)` — Home, Search, Playlists, Create, Settings
 - `app/convert` — cross-provider conversion wizard (source → match review → summary → create)
 - `app/playlist/[id]` — playlist detail (Play / Add / Convert / Delete)
-- `app/playlist/ai` — generation preview (create only after confirm)
+- `app/ai-playlist` — AI playlist generator (preview, edit, confirm create)
+- `app/playlist/ai` — same screen (compat route)
 - `app/playlist/convert` — same conversion wizard (compat route)
 - `app/auth/callback` — OAuth deep-link landing
 
@@ -29,7 +30,8 @@ Express REST API in `backend/src`:
 
 - `config/` — environment (Zod) and Prisma client
 - `providers/` — `MusicProvider` implementations
-- `services/` — playlists, search, matching, duplicates, generation, token encryption
+- `services/` — playlists, search, matching, duplicates, conversion, token encryption
+- `ai/` — LLM provider, intent, ranking, `PlaylistGeneratorService`
 - `controllers/` + `routes/` — HTTP surface
 - `middleware/` — Helmet is applied in `server.ts`; CORS, rate limit, JWT auth, Zod validation, error mapping
 
@@ -51,7 +53,8 @@ PostgreSQL via Prisma (`prisma/schema.prisma`):
 - `MusicAccount` — connected provider; `accessToken` / `refreshToken` are ciphertext
 - `Track` — cross-platform ids (`isrc`, `spotifyId`, `youtubeVideoId`, `amazonMusicId`)
 - `Playlist` / `PlaylistTrack` — server-side playlist definition (`position` preserved)
-- `PlaylistGenerationRequest` — generation job; status stays `GENERATED` until the user confirms
+- `PlaylistGenerationRequest` — legacy generation job
+- `PlaylistGeneration` — AI playlist job (`requestText`, `parsedIntent`, preview tracks, status `GENERATED` / `EDITED` / `CREATED` / `FAILED`)
 - `PlaylistConversion` / `ConversionTrack` — cross-provider conversion job and per-track decisions
 - `OAuthState` — CSRF state + PKCE verifier, short-lived
 
@@ -119,10 +122,18 @@ Matching searches run with concurrency 3 and retry only transient rate-limit/net
 
 `YouTubeProvider.reorderPlaylist` implements a **single-item** move via official `playlistItems.update` (`snippet.position`). Multi-item range moves (`rangeLength !== 1`) return `NOT_SUPPORTED` (HTTP 501). MusicMix does not fake a bulk reorder: each YouTube update costs quota, and a partial update could leave the playlist inconsistent.
 
-## Playlist generation
+## Playlist generation (AI)
 
-`PlaylistGenerationService` interprets structured filters and a free-text prompt (years, duration, mood, genre). It searches **connected** official providers, de-duplicates, ranks by filter fit, and returns a preview.
+`backend/src/ai` owns intent parsing, ranking, duration, and the `PlaylistGeneratorService` flow:
 
-Playlists are **not** created on a provider until the user confirms (`POST /api/ai/generate-playlist/:requestId/confirm` then `POST /api/playlists/:id/create-on-provider`).
+User request → parse intent (LLM, grounded in the prompt) → validate → search provider adapters → normalize → de-duplicate → filter → score/rank → duration fill → preview → **user review/edits** → **explicit Create Playlist** → provider `createPlaylist` + local `Playlist` row.
 
-There is no fake catalog. If nothing is connected, the API tells the user to connect Spotify or YouTube.
+`ConfigurableLlmProvider` implements `AIProvider` (`parsePlaylistRequest`, `rankTracks`, `generatePlaylistDescription`) using `AI_PROVIDER` / `AI_API_KEY` / `AI_MODEL`. Missing credentials throw `AI_UNAVAILABLE`. There is no regex-only silent fallback that pretends to be the LLM.
+
+Search stays inside `SpotifyProvider` / `YouTubeProvider` via `SearchService`. Up to **six** queries run with concurrency **2**. Empty queries are skipped; expired OAuth fails the job; YouTube quota and rate limits surface as user-safe errors if no tracks were found.
+
+Track scores are 0–100 from evidence only (`languageMatch`, `genreMatch`, `moodMatch`, `yearMatch`, `artistMatch`, `metadataConfidence`, `providerAvailability`). Language/genre/mood/energy/tempo stay `unknown` unless the catalog text actually contains those terms. MusicMix never invents BPM or a “perfect match.”
+
+Duplicates use `DuplicateDetector` (ISRC, provider id, normalized title+artist) unless `allowDuplicates` is true.
+
+The destination playlist is **never** created during generate. `POST /api/ai/playlists/:id/create` is the confirmation step.

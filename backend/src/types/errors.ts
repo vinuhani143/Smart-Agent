@@ -17,6 +17,7 @@ export const ErrorCode = {
   NOT_FOUND: 'NOT_FOUND',
   CONFIGURATION_ERROR: 'CONFIGURATION_ERROR',
   CONFLICT: 'CONFLICT',
+  AI_UNAVAILABLE: 'AI_UNAVAILABLE',
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
@@ -165,5 +166,14 @@ export class ConflictError extends AppError {
   constructor(message: string) {
     super(ErrorCode.CONFLICT, message, 409);
     this.name = 'ConflictError';
+  }
+}
+
+export class AiUnavailableError extends AppError {
+  constructor(
+    message = 'The AI service is unavailable. Check AI_PROVIDER, AI_API_KEY, and AI_MODEL, then try again.',
+  ) {
+    super(ErrorCode.AI_UNAVAILABLE, message, 503);
+    this.name = 'AiUnavailableError';
   }
 }

@@ -68,6 +68,8 @@ async function createSession(): Promise<{ token: string; userId: string }> {
   const token = String(body.token);
   const userId = String(body.userId);
   createdUserIds.push(userId);
+  assert.equal(body.anonymous, true);
+  assert.ok(body.recoveryCode);
   assert.equal(JSON.stringify(body).includes('accessToken'), false);
   assert.equal(JSON.stringify(body).includes('refreshToken'), false);
   return { token, userId };
@@ -79,6 +81,19 @@ describe('health and AI configuration', () => {
     assert.equal(status, 200);
     assert.equal(body.ok, true);
     assert.equal(body.service, 'musicmix-backend');
+    assert.ok(body.database === 'up' || body.database === 'down');
+    const providers = body.providers as Record<string, string>;
+    assert.ok(providers.spotify === 'configured' || providers.spotify === 'not_configured');
+    assert.equal(JSON.stringify(body).includes('SPOTIFY_CLIENT_SECRET'), false);
+    assert.equal(JSON.stringify(body).includes('AI_API_KEY'), false);
+  });
+
+  it('reports release readiness without secrets', async () => {
+    const { status, body } = await json('/api/release-readiness');
+    assert.equal(status, 200);
+    assert.ok(body.spotifyOAuth);
+    assert.ok(body.youtubeOAuth);
+    assert.equal(JSON.stringify(body).includes('client_secret'), false);
   });
 
   it('reports AI as unconfigured when credentials are empty', async () => {
@@ -158,6 +173,13 @@ describe('IDOR protection', () => {
     });
     assert.equal(stolenUpdate.status, 404);
 
+    const stolenReorder = await json(`/api/playlists/${playlist.id}/tracks/reorder`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${userB.token}` },
+      body: JSON.stringify({ trackIds: ['x'] }),
+    });
+    assert.ok(stolenReorder.status === 404 || stolenReorder.status === 400);
+
     const stolenDelete = await json(`/api/playlists/${playlist.id}`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${userB.token}` },
@@ -170,6 +192,23 @@ describe('IDOR protection', () => {
     assert.equal(owner.status, 200);
     const owned = owner.body.playlist as { name: string };
     assert.equal(owned.name, 'A private mix');
+  });
+
+  it('returns account view and deletes only the current user', async () => {
+    const userA = await createSession();
+    const userB = await createSession();
+    const me = await json('/api/auth/me', { headers: { Authorization: `Bearer ${userA.token}` } });
+    assert.equal(me.status, 200);
+    assert.equal(me.body.anonymous, true);
+    const deleted = await json('/api/auth/account', {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${userA.token}` },
+    });
+    assert.equal(deleted.status, 200);
+    const after = await json('/api/playlists', { headers: { Authorization: `Bearer ${userA.token}` } });
+    assert.equal(after.status, 401);
+    const other = await json('/api/playlists', { headers: { Authorization: `Bearer ${userB.token}` } });
+    assert.equal(other.status, 200);
   });
 
   it('does not let user B read user A conversions or AI generations', async () => {
@@ -303,5 +342,89 @@ describe('request validation and Amazon disabled state', () => {
     const a = first.body.playlist as { id: string };
     const b = second.body.playlist as { id: string };
     assert.equal(a.id, b.id);
+  });
+
+  it('replays create playlist for the same Idempotency-Key', async () => {
+    const session = await createSession();
+    const headers = {
+      Authorization: `Bearer ${session.token}`,
+      'Idempotency-Key': 'same-create-key-1',
+    };
+    const payload = JSON.stringify({ name: 'Key mix' });
+    const [first, second] = await Promise.all([
+      json('/api/playlists', { method: 'POST', headers, body: payload }),
+      json('/api/playlists', { method: 'POST', headers, body: payload }),
+    ]);
+    assert.ok(first.status === 200 || first.status === 201, JSON.stringify(first.body));
+    assert.ok(second.status === 200 || second.status === 201, JSON.stringify(second.body));
+    const a = first.body.playlist as { id: string };
+    const b = second.body.playlist as { id: string };
+    assert.equal(a.id, b.id);
+    const listed = await json('/api/playlists', { headers: { Authorization: `Bearer ${session.token}` } });
+    const playlists = listed.body.playlists as Array<{ name: string }>;
+    assert.equal(playlists.filter((item) => item.name === 'Key mix').length, 1);
+  });
+
+  it('restores an anonymous session with a recovery code and rejects a stranger code', async () => {
+    const session = await createSession();
+    const issued = await json('/api/auth/session', { method: 'POST' });
+    const recoveryCode = String(issued.body.recoveryCode);
+    createdUserIds.push(String(issued.body.userId));
+    const recovered = await json('/api/auth/recover', {
+      method: 'POST',
+      body: JSON.stringify({ recoveryCode }),
+    });
+    assert.equal(recovered.status, 200);
+    assert.equal(recovered.body.userId, issued.body.userId);
+    const invalid = await json('/api/auth/recover', {
+      method: 'POST',
+      body: JSON.stringify({ recoveryCode: 'AAAAA-BBBBB-CCCCC-DDDDD' }),
+    });
+    assert.equal(invalid.status, 401);
+    const other = await json('/api/playlists', { headers: { Authorization: `Bearer ${session.token}` } });
+    assert.equal(other.status, 200);
+  });
+
+  it('lets the owner reorder tracks over HTTP', async () => {
+    const session = await createSession();
+    const created = await json('/api/playlists', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${session.token}` },
+      body: JSON.stringify({
+        name: 'Reorder HTTP',
+        tracks: [
+          { provider: 'spotify', providerTrackId: 'h1', title: 'One', artist: 'A', spotifyId: 'h1' },
+          { provider: 'spotify', providerTrackId: 'h2', title: 'Two', artist: 'A', spotifyId: 'h2' },
+        ],
+      }),
+    });
+    assert.ok(created.status === 200 || created.status === 201, JSON.stringify(created.body));
+    const playlist = created.body.playlist as { id: string; tracks: Array<{ id: string }> };
+    const reversed = [...playlist.tracks.map((track) => track.id)].reverse();
+    const reordered = await json(`/api/playlists/${playlist.id}/tracks/reorder`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${session.token}` },
+      body: JSON.stringify({ trackIds: reversed }),
+    });
+    assert.equal(reordered.status, 200);
+    const next = reordered.body.playlist as { tracks: Array<{ id: string }> };
+    assert.deepEqual(next.tracks.map((track) => track.id), reversed);
+  });
+});
+
+describe('OAuth callback and internal cleanup', () => {
+  it('redirects when the OAuth callback is missing state', async () => {
+    const response = await fetch(`${base}/api/auth/spotify/callback?code=abc`, { redirect: 'manual' });
+    assert.ok(response.status === 302 || response.status === 301 || response.status === 303);
+    const location = response.headers.get('location') ?? '';
+    assert.match(location, /musicmix:\/\/auth\/callback/);
+    assert.match(location, /status=error/);
+    assert.equal(location.includes('client_secret'), false);
+  });
+
+  it('rejects internal remote cleanup without the operator key', async () => {
+    const { status, body } = await json('/api/internal/remote-operations/missing/cleanup', { method: 'POST' });
+    assert.ok(status === 403 || status === 503, JSON.stringify(body));
+    assert.equal(JSON.stringify(body).includes('INTERNAL_CLEANUP_KEY'), false);
   });
 });

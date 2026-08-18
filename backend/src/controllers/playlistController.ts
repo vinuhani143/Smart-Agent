@@ -10,8 +10,10 @@ import {
   getPlaylist,
   listPlaylists,
   removeTrackFromPlaylist,
+  reorderPlaylistTracks,
   updatePlaylist,
 } from '../services/PlaylistService';
+import { withIdempotency } from '../services/IdempotencyService';
 import { getProvider } from '../providers/ProviderRegistry';
 import { requireStoredAccount, withProviderTokens } from '../services/TokenService';
 import { matchTrack } from '../services/TrackMatcher';
@@ -77,12 +79,20 @@ export async function list(req: Request, res: Response): Promise<void> {
   });
 }
 
+export const reorderTracksSchema = z
+  .object({
+    trackIds: z.array(z.string().min(1).max(128)).min(1).max(500),
+  })
+  .strict();
+
 export async function create(req: Request, res: Response): Promise<void> {
   const body = createPlaylistSchema.parse(req.body);
-  const playlist = await oncePerKey(`playlist:create:${req.userId}:${body.name}`, () =>
-    createLocalPlaylist(req.userId!, body),
-  );
-  res.status(201).json({ playlist: serializePlaylist(playlist) });
+  await withIdempotency(req, res, req.userId!, async () => {
+    const playlist = await oncePerKey(`playlist:create:${req.userId}:${body.name}`, () =>
+      createLocalPlaylist(req.userId!, body),
+    );
+    return { status: 201, body: { playlist: serializePlaylist(playlist) } };
+  });
 }
 
 export async function getOne(req: Request, res: Response): Promise<void> {
@@ -120,18 +130,27 @@ export async function removeTrack(req: Request, res: Response): Promise<void> {
   res.json({ playlist: serializePlaylist(playlist) });
 }
 
+export async function reorderTracks(req: Request, res: Response): Promise<void> {
+  const body = reorderTracksSchema.parse(req.body);
+  const playlist = await reorderPlaylistTracks(req.userId!, String(req.params.id), body.trackIds);
+  res.json({ playlist: serializePlaylist(playlist) });
+}
+
 export async function createOnProvider(req: Request, res: Response): Promise<void> {
   const body = createOnProviderSchema.parse(req.body);
-  const result = await createPlaylistOnProvider(
-    req.userId!,
-    String(req.params.id),
-    body.provider,
-    body.confirmedTrackIds,
-  );
-  res.json({
-    providerPlaylist: result.remote,
-    added: result.added,
-    skipped: result.skipped,
+  await withIdempotency(req, res, req.userId!, async () => {
+    const result = await oncePerKey(
+      `playlist:create-on-provider:${req.userId}:${String(req.params.id)}:${body.provider}`,
+      () => createPlaylistOnProvider(req.userId!, String(req.params.id), body.provider, body.confirmedTrackIds),
+    );
+    return {
+      status: 200,
+      body: {
+        providerPlaylist: result.remote,
+        added: result.added,
+        skipped: result.skipped,
+      },
+    };
   });
 }
 

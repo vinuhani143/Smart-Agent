@@ -31,6 +31,7 @@ describe('YouTubeProvider reorder', () => {
     assert.equal(url.searchParams.has('client_secret'), false);
     assert.equal(authorizationUrl.includes('google-client-secret'), false);
     assert.equal(url.searchParams.get('code_challenge'), 'challenge');
+    assert.equal(url.searchParams.get('code_challenge_method'), 'S256');
   });
 
   it('rejects multi-item reorder to avoid partial quota-expensive updates', async () => {

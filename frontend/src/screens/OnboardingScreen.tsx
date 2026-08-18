@@ -23,6 +23,10 @@ const SLIDES = [
     title: 'Connect Your Music Services',
     body: 'Spotify and YouTube are ready when you are. Amazon Music is Coming Soon / API access required.',
   },
+  {
+    title: 'This account stays on this device',
+    body: 'MusicMix currently uses a device-only account. If you uninstall the app, clear data, or lose the recovery code shown after first launch, playlists stored in MusicMix cannot be restored. Connected Spotify or YouTube accounts are not a MusicMix login.',
+  },
 ];
 
 export function OnboardingScreen() {

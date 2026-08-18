@@ -7,6 +7,7 @@ import {
   createConvertedPlaylist,
   getConversion,
 } from '../services/ConversionService';
+import { withIdempotency } from '../services/IdempotencyService';
 import { oncePerKey } from '../utils/inFlight';
 import type { TrackResult } from '../types/provider';
 import { providerIdSchema, trackResultSchema } from '../validation/schemas';
@@ -74,8 +75,10 @@ export async function confirm(req: Request, res: Response): Promise<void> {
 
 export async function create(req: Request, res: Response): Promise<void> {
   const body = createConversionSchema.parse(req.body ?? {});
-  const result = await oncePerKey(`conversion:create:${req.userId}:${String(req.params.id)}`, () =>
-    createConvertedPlaylist(req.userId!, String(req.params.id), body),
-  );
-  res.json(result);
+  await withIdempotency(req, res, req.userId!, async () => {
+    const result = await oncePerKey(`conversion:create:${req.userId}:${String(req.params.id)}`, () =>
+      createConvertedPlaylist(req.userId!, String(req.params.id), body),
+    );
+    return { status: 200, body: result };
+  });
 }

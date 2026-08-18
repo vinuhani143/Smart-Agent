@@ -299,6 +299,13 @@ export async function createConvertedPlaylist(
   if (conversion.status === ConversionStatus.ANALYZED) {
     throw new ConflictError('Confirm selected matches before creating the destination playlist.');
   }
+  if (conversion.status === ConversionStatus.CREATED && conversion.destinationPlaylistId) {
+    return serializeConversion(conversion, {
+      createdMessage: conversion.sourcePlaylistName
+        ? `“${conversion.sourcePlaylistName}” was already created.`
+        : 'This playlist was already created.',
+    });
+  }
   if (conversion.status === ConversionStatus.FAILED && !conversion.destinationPlaylistId) {
     throw new ConflictError('This conversion failed before a playlist was created. Start a new conversion.');
   }

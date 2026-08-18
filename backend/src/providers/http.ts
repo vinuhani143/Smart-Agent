@@ -1,6 +1,7 @@
 import {
   InsufficientPermissionsError,
   NetworkError,
+  NotFoundError,
   RateLimitedError,
   TokenExpiredError,
   TokenInvalidError,
@@ -70,6 +71,9 @@ export async function throwIfProviderError(response: Response): Promise<void> {
   }
   if (response.status === 403) {
     throw new InsufficientPermissionsError();
+  }
+  if (response.status === 404) {
+    throw new NotFoundError('That item was not found on the music service.');
   }
   if (response.status === 429) {
     throw new RateLimitedError(Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : undefined);

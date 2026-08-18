@@ -15,6 +15,15 @@ export function isTransientProviderError(error: unknown): boolean {
     return true;
   }
   if (error instanceof AppError) {
+    if (
+      error.code === ErrorCode.NOT_FOUND ||
+      error.code === ErrorCode.TOKEN_INVALID ||
+      error.code === ErrorCode.TOKEN_EXPIRED ||
+      error.code === ErrorCode.INSUFFICIENT_PERMISSIONS ||
+      error.code === ErrorCode.QUOTA_EXCEEDED
+    ) {
+      return false;
+    }
     return error.code === ErrorCode.NETWORK_ERROR || error.code === ErrorCode.RATE_LIMITED;
   }
   return false;

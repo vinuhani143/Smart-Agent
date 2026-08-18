@@ -39,4 +39,11 @@ describe('validateIntent', () => {
       (error: unknown) => error instanceof AppError,
     );
   });
+
+  it('rejects more than 50 tracks from the model or client', () => {
+    assert.throws(
+      () => validateIntent({ maxTracks: 80, language: 'Telugu' }, '80 Telugu songs'),
+      (error: unknown) => error instanceof AppError,
+    );
+  });
 });

@@ -4,6 +4,7 @@ import { getEnv } from '../config/env';
 import { prisma } from '../config/prisma';
 import { parseProviderId, requireEnabledProvider, toPrismaProvider } from '../providers/ProviderRegistry';
 import { createSession } from '../services/AuthService';
+import { TokenEncryptionService } from '../services/TokenEncryptionService';
 import { disconnectMusicAccount, saveMusicAccount } from '../services/TokenService';
 import { OAuthCancelledError, OAuthFailedError } from '../types/errors';
 import type { ProviderId } from '../types/provider';
@@ -39,6 +40,7 @@ export async function createAnonymousSession(_req: Request, res: Response): Prom
     httpOnly: true,
     sameSite: 'lax',
     secure: getEnv().NODE_ENV === 'production',
+    path: '/',
     maxAge: 30 * 24 * 60 * 60 * 1000,
   });
   res.json({ token: session.token, userId: session.userId });
@@ -60,7 +62,7 @@ export async function startOAuth(req: Request, res: Response): Promise<void> {
       userId,
       provider: toPrismaProvider(providerId),
       state,
-      codeVerifier,
+      codeVerifier: TokenEncryptionService.encrypt(codeVerifier),
       expiresAt: new Date(Date.now() + 10 * 60 * 1000),
     },
   });
@@ -115,17 +117,26 @@ export async function oauthCallback(req: Request, res: Response): Promise<void> 
     return;
   }
 
+  const pendingProvider = parseProviderId(
+    pending.provider === 'SPOTIFY' ? 'spotify' : pending.provider === 'YOUTUBE' ? 'youtube' : 'amazon_music',
+  );
+  if (pendingProvider !== requestedProvider) {
+    await prisma.oAuthState.delete({ where: { id: pending.id } });
+    res.redirect(oauthRedirect('error', 'This sign-in link is invalid. Please try again.'));
+    return;
+  }
+
   await prisma.oAuthState.delete({ where: { id: pending.id } });
 
   try {
-    const providerId = parseProviderId(
-      pending.provider === 'SPOTIFY' ? 'spotify' : pending.provider === 'YOUTUBE' ? 'youtube' : 'amazon_music',
-    );
-    const adapter = requireEnabledProvider(providerId);
-    const result = await adapter.authenticate(code, pending.codeVerifier ?? undefined);
+    const adapter = requireEnabledProvider(pendingProvider);
+    const codeVerifier = pending.codeVerifier
+      ? TokenEncryptionService.decryptOrPlain(pending.codeVerifier)
+      : undefined;
+    const result = await adapter.authenticate(code, codeVerifier);
     await saveMusicAccount({
       userId: pending.userId,
-      provider: providerId,
+      provider: pendingProvider,
       user: result.user,
       tokens: result,
     });

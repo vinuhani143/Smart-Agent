@@ -1,28 +1,10 @@
 import type { Request, Response } from 'express';
-import { z } from 'zod';
 import { parseProviderId } from '../providers/ProviderRegistry';
 import { searchConnectedProviders, searchProvider } from '../services/SearchService';
-import { AppError, ErrorCode } from '../types/errors';
-
-const searchQuery = z.object({
-  q: z.string().min(1, 'Enter a search term.'),
-  language: z.string().optional(),
-  genre: z.string().optional(),
-  mood: z.string().optional(),
-  yearFrom: z.coerce.number().int().optional(),
-  yearTo: z.coerce.number().int().optional(),
-  durationMinMs: z.coerce.number().int().optional(),
-  durationMaxMs: z.coerce.number().int().optional(),
-  limit: z.coerce.number().int().min(1).max(50).optional(),
-  offset: z.coerce.number().int().min(0).optional(),
-});
+import { searchQuerySchema } from '../validation/schemas';
 
 function parseSearch(req: Request) {
-  const parsed = searchQuery.safeParse(req.query);
-  if (!parsed.success) {
-    throw new AppError(ErrorCode.VALIDATION_ERROR, 'Enter a search term.', 400);
-  }
-  return parsed.data;
+  return searchQuerySchema.parse(req.query);
 }
 
 export async function searchAll(req: Request, res: Response): Promise<void> {

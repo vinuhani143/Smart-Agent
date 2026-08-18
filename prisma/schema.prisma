@@ -125,6 +125,8 @@ model Playlist {
   tracks           PlaylistTrack[]
 
   @@index([userId])
+  @@index([userId, updatedAt])
+  @@index([sourcePlaylistId])
 }
 
 model PlaylistTrack {

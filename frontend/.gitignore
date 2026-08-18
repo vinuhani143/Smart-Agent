@@ -30,8 +30,11 @@ yarn-error.*
 .DS_Store
 *.pem
 
-# local env files
-.env*.local
+# local env files — never commit real API URLs with secrets
+.env
+.env.*
+!.env.example
+!.env.production.example
 
 # typescript
 *.tsbuildinfo

@@ -25,6 +25,7 @@ const envSchema = z.object({
   TOKEN_ENCRYPTION_KEY: z
     .string()
     .regex(/^[0-9a-fA-F]{64}$/, 'TOKEN_ENCRYPTION_KEY must be 64 hex characters (32 bytes)'),
+  DEBUG_ERRORS: z.string().optional().default('false'),
   SPOTIFY_CLIENT_ID: z.string().optional().default(''),
   SPOTIFY_CLIENT_SECRET: z.string().optional().default(''),
   SPOTIFY_REDIRECT_URI: z.string().optional().default(''),

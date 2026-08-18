@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Artwork } from '@/components/Artwork';
 import { ProviderBadge } from '@/components/ProviderBadge';
 import { IconButton } from '@/components/Screen';
 import { useAppTheme } from '@/theme/AppThemeProvider';
@@ -44,13 +45,7 @@ export function TrackRow({
         { backgroundColor: colors.card, borderColor: selected ? colors.accent : colors.border },
       ]}
     >
-      {track.thumbnailUrl ? (
-        <Image source={{ uri: track.thumbnailUrl }} style={styles.art} accessibilityIgnoresInvertColors />
-      ) : (
-        <View style={[styles.art, styles.artFallback, { backgroundColor: colors.elevated }]}>
-          <Ionicons name="musical-notes" size={22} color={colors.muted} />
-        </View>
-      )}
+      <Artwork uri={track.thumbnailUrl} style={styles.art} accessibilityLabel={`${track.title} artwork`} />
       <View style={styles.copy}>
         <Text style={[styles.title, { color: colors.text }]} numberOfLines={1}>
           {track.title}
@@ -113,10 +108,6 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 10,
-  },
-  artFallback: {
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   copy: {
     flex: 1,

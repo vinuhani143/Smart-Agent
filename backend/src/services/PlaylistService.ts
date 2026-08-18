@@ -29,8 +29,9 @@ export async function listPlaylists(userId: string) {
     where: { userId },
     include: {
       tracks: {
-        include: { track: true },
-        orderBy: { position: 'asc' },
+        select: {
+          track: { select: { durationMs: true } },
+        },
       },
     },
     orderBy: { updatedAt: 'desc' },

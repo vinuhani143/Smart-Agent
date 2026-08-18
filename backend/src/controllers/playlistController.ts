@@ -15,61 +15,52 @@ import {
 import { getProvider } from '../providers/ProviderRegistry';
 import { requireStoredAccount, withProviderTokens } from '../services/TokenService';
 import { matchTrack } from '../services/TrackMatcher';
+import { oncePerKey } from '../utils/inFlight';
 import type { TrackResult } from '../types/provider';
+import { providerIdSchema, trackResultSchema } from '../validation/schemas';
 
-const trackResultSchema = z.object({
-  provider: z.enum(['spotify', 'youtube', 'amazon_music']),
-  providerTrackId: z.string().min(1),
-  title: z.string().min(1),
-  artist: z.string().min(1),
-  album: z.string().optional(),
-  durationMs: z.number().int().optional(),
-  releaseDate: z.string().optional(),
-  isrc: z.string().optional(),
-  thumbnailUrl: z.string().optional(),
-  explicit: z.boolean().optional(),
-  originalTitle: z.string().optional(),
-  metadataConfidence: z.number().optional(),
-  parsedTitle: z.string().optional(),
-  parsedArtist: z.string().optional(),
-  youtubeVideoId: z.string().optional(),
-  spotifyId: z.string().optional(),
-});
+export const createPlaylistSchema = z
+  .object({
+    name: z.string().min(1).max(120),
+    description: z.string().max(2000).optional(),
+    coverImageUrl: z.string().url().max(2000).optional(),
+    language: z.string().max(80).optional(),
+    genre: z.string().max(80).optional(),
+    mood: z.string().max(80).optional(),
+    yearFrom: z.number().int().min(1900).max(2100).optional(),
+    yearTo: z.number().int().min(1900).max(2100).optional(),
+    targetDurationMs: z.number().int().min(0).max(24 * 60 * 60 * 1000).optional(),
+    tracks: z.array(trackResultSchema).max(200).optional(),
+    allowDuplicates: z.boolean().optional(),
+    targetProvider: providerIdSchema.optional(),
+  })
+  .strict();
 
-export const createPlaylistSchema = z.object({
-  name: z.string().min(1).max(120),
-  description: z.string().max(2000).optional(),
-  coverImageUrl: z.string().url().optional(),
-  language: z.string().optional(),
-  genre: z.string().optional(),
-  mood: z.string().optional(),
-  yearFrom: z.number().int().optional(),
-  yearTo: z.number().int().optional(),
-  targetDurationMs: z.number().int().optional(),
-  tracks: z.array(trackResultSchema).optional(),
-  allowDuplicates: z.boolean().optional(),
-  targetProvider: z.enum(['spotify', 'youtube', 'amazon_music']).optional(),
-});
-
-export const updatePlaylistSchema = z.object({
-  name: z.string().min(1).max(120).optional(),
-  description: z.string().max(2000).optional(),
-  coverImageUrl: z.string().url().optional(),
-});
+export const updatePlaylistSchema = z
+  .object({
+    name: z.string().min(1).max(120).optional(),
+    description: z.string().max(2000).optional(),
+    coverImageUrl: z.string().url().max(2000).optional(),
+  })
+  .strict();
 
 export const addTrackSchema = z.object({
   track: trackResultSchema,
-});
+}).strict();
 
-export const createOnProviderSchema = z.object({
-  provider: z.enum(['spotify', 'youtube', 'amazon_music']),
-  confirmedTrackIds: z.array(z.string()).optional(),
-});
+export const createOnProviderSchema = z
+  .object({
+    provider: providerIdSchema,
+    confirmedTrackIds: z.array(z.string().min(1).max(128)).max(200).optional(),
+  })
+  .strict();
 
-export const convertSchema = z.object({
-  sourcePlaylistId: z.string().min(1),
-  destinationProvider: z.enum(['spotify', 'youtube', 'amazon_music']),
-});
+export const convertSchema = z
+  .object({
+    sourcePlaylistId: z.string().min(1).max(128),
+    destinationProvider: providerIdSchema,
+  })
+  .strict();
 
 export async function list(req: Request, res: Response): Promise<void> {
   const playlists = await listPlaylists(req.userId!);
@@ -80,7 +71,7 @@ export async function list(req: Request, res: Response): Promise<void> {
   const aiIds = new Set(generated.map((row) => row.resultPlaylistId));
   res.json({
     playlists: playlists.map((playlist) => ({
-      ...serializePlaylist(playlist),
+      ...serializePlaylistSummary(playlist),
       aiGenerated: aiIds.has(playlist.id),
     })),
   });
@@ -88,7 +79,9 @@ export async function list(req: Request, res: Response): Promise<void> {
 
 export async function create(req: Request, res: Response): Promise<void> {
   const body = createPlaylistSchema.parse(req.body);
-  const playlist = await createLocalPlaylist(req.userId!, body);
+  const playlist = await oncePerKey(`playlist:create:${req.userId}:${body.name}`, () =>
+    createLocalPlaylist(req.userId!, body),
+  );
   res.status(201).json({ playlist: serializePlaylist(playlist) });
 }
 
@@ -190,6 +183,29 @@ export async function convertPreview(req: Request, res: Response): Promise<void>
       })),
     })),
   });
+}
+
+function serializePlaylistSummary(
+  playlist: Awaited<ReturnType<typeof listPlaylists>>[number],
+): Record<string, unknown> {
+  const totalDurationMs = playlist.tracks.reduce((sum, entry) => sum + (entry.track.durationMs ?? 0), 0);
+  return {
+    id: playlist.id,
+    name: playlist.name,
+    description: playlist.description,
+    coverImageUrl: playlist.coverImageUrl,
+    sourceProvider: playlist.sourceProvider,
+    sourcePlaylistId: playlist.sourcePlaylistId,
+    language: playlist.language,
+    genre: playlist.genre,
+    mood: playlist.mood,
+    yearFrom: playlist.yearFrom,
+    yearTo: playlist.yearTo,
+    trackCount: playlist.tracks.length,
+    totalDurationMs,
+    createdAt: playlist.createdAt,
+    updatedAt: playlist.updatedAt,
+  };
 }
 
 function serializePlaylist(

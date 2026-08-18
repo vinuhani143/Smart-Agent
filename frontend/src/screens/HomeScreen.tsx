@@ -42,7 +42,7 @@ export function HomeScreen() {
             emoji="🔄"
             title="Convert Playlist"
             subtitle="Copy between services"
-            onPress={() => router.push('/playlist/convert')}
+            onPress={() => router.push('/convert')}
           />
           <ActionCard
             emoji="⭐"

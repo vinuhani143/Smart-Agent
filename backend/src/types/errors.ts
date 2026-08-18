@@ -160,3 +160,10 @@ export class NotFoundError extends AppError {
     this.name = 'NotFoundError';
   }
 }
+
+export class ConflictError extends AppError {
+  constructor(message: string) {
+    super(ErrorCode.CONFLICT, message, 409);
+    this.name = 'ConflictError';
+  }
+}

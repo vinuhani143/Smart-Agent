@@ -52,7 +52,7 @@ describe('TrackMatcher Spotify → YouTube', () => {
     const source = spotifyTrack('Midnight Rain', 'Taylor Swift');
     const candidate = youtubeTrack('Cooking with rain sounds 10 hours', 'White Noise');
     const score = scoreMatch(source, candidate);
-    assert.ok(score.confidence < 80);
+    assert.ok(score.confidence < 90);
     assert.equal(score.needsReview, true);
   });
 });

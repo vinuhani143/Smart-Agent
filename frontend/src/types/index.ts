@@ -87,3 +87,69 @@ export interface GeneratePlaylistPayload {
   allowDuplicates?: boolean;
   targetProvider?: ProviderId;
 }
+
+export type ConvertibleProvider = 'spotify' | 'youtube';
+
+export type ConversionMatchStatus =
+  | 'matched'
+  | 'needs_review'
+  | 'not_found'
+  | 'accepted'
+  | 'skipped'
+  | 'manual'
+  | 'duplicate';
+
+export interface ConversionAlternative {
+  track: TrackResult;
+  confidence: number;
+  matchMethod?: string;
+}
+
+export interface ConversionMatch {
+  id: string;
+  sourceTrackId: string;
+  destinationTrackId?: string | null;
+  sourceTrack: TrackResult;
+  destinationTrack?: TrackResult | null;
+  alternatives: ConversionAlternative[];
+  confidence: number;
+  matchMethod?: string | null;
+  status: ConversionMatchStatus;
+  addedToDestination?: boolean;
+  errorMessage?: string | null;
+}
+
+export interface ConversionSummary {
+  totalTracks: number;
+  matchedTracks: number;
+  reviewTracks: number;
+  notFoundTracks: number;
+  duplicateTracks: number;
+  destinationTrackCount: number;
+  addedTracks?: number;
+}
+
+export interface ConversionResult {
+  conversionId: string;
+  status: string;
+  sourceProvider: ConvertibleProvider;
+  sourcePlaylistId: string;
+  sourcePlaylistName?: string | null;
+  destinationProvider: ConvertibleProvider;
+  destinationPlaylistId?: string | null;
+  localPlaylistId?: string | null;
+  summary: ConversionSummary;
+  errorMessage?: string | null;
+  createdMessage?: string;
+  matches: ConversionMatch[];
+}
+
+export interface RemotePlaylist {
+  provider: ConvertibleProvider;
+  providerPlaylistId: string;
+  name: string;
+  description?: string;
+  coverImageUrl?: string;
+  trackCount?: number;
+  ownerName?: string;
+}

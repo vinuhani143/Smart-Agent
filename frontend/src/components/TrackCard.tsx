@@ -9,14 +9,29 @@ interface TrackCardProps {
   track: TrackResult;
   onAdd?: () => void;
   onRemove?: () => void;
+  onSelect?: () => void;
+  selected?: boolean;
   confidence?: number;
+  actionLabel?: string;
 }
 
-export function TrackCard({ track, onAdd, onRemove, confidence }: TrackCardProps) {
+export function TrackCard({
+  track,
+  onAdd,
+  onRemove,
+  onSelect,
+  selected,
+  confidence,
+  actionLabel,
+}: TrackCardProps) {
   const meta = providerMeta[track.provider];
 
   return (
-    <View style={styles.card}>
+    <Pressable
+      onPress={onSelect}
+      disabled={!onSelect}
+      style={[styles.card, selected && styles.selected]}
+    >
       {track.thumbnailUrl ? (
         <Image source={{ uri: track.thumbnailUrl }} style={styles.art} />
       ) : (
@@ -40,6 +55,7 @@ export function TrackCard({ track, onAdd, onRemove, confidence }: TrackCardProps
         {track.metadataConfidence !== undefined && track.metadataConfidence < 80 ? (
           <Text style={styles.confidence}>Title/artist confidence: {track.metadataConfidence}%</Text>
         ) : null}
+        {actionLabel ? <Text style={styles.confidence}>{actionLabel}</Text> : null}
       </View>
       <View style={styles.actions}>
         <MaterialCommunityIcons name={meta.icon} size={18} color={meta.color} />
@@ -53,8 +69,13 @@ export function TrackCard({ track, onAdd, onRemove, confidence }: TrackCardProps
             <Ionicons name="close" size={18} color={colors.text} />
           </Pressable>
         ) : null}
+        {onSelect ? (
+          <Pressable onPress={onSelect} style={styles.round}>
+            <Ionicons name={selected ? 'checkmark' : 'ellipse-outline'} size={18} color={colors.text} />
+          </Pressable>
+        ) : null}
       </View>
-    </View>
+    </Pressable>
   );
 }
 
@@ -68,6 +89,10 @@ const styles = StyleSheet.create({
     padding: 10,
     borderWidth: 1,
     borderColor: colors.border,
+  },
+  selected: {
+    borderColor: colors.accent,
+    backgroundColor: colors.accentMuted,
   },
   art: {
     width: 56,

@@ -1,16 +1,21 @@
 import { StyleSheet, Text, View } from 'react-native';
-import { colors } from '@/constants/theme';
+import { AppButton } from '@/components/AppButton';
+import { useAppTheme } from '@/theme/AppThemeProvider';
 
 interface EmptyStateProps {
   title: string;
   body: string;
+  actionLabel?: string;
+  onAction?: () => void;
 }
 
-export function EmptyState({ title, body }: EmptyStateProps) {
+export function EmptyState({ title, body, actionLabel, onAction }: EmptyStateProps) {
+  const { colors } = useAppTheme();
   return (
     <View style={styles.wrap}>
-      <Text style={styles.title}>{title}</Text>
-      <Text style={styles.body}>{body}</Text>
+      <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
+      <Text style={[styles.body, { color: colors.muted }]}>{body}</Text>
+      {actionLabel && onAction ? <AppButton label={actionLabel} onPress={onAction} variant="secondary" /> : null}
     </View>
   );
 }
@@ -23,12 +28,11 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   title: {
-    color: colors.text,
     fontSize: 16,
     fontWeight: '700',
+    textAlign: 'center',
   },
   body: {
-    color: colors.muted,
     fontSize: 13,
     textAlign: 'center',
     lineHeight: 18,

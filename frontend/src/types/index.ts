@@ -65,6 +65,7 @@ export interface PlaylistSummary {
   tracks?: PlaylistTrackView[];
   createdAt: string;
   updatedAt: string;
+  aiGenerated?: boolean;
 }
 
 export interface PlaylistTrackView {

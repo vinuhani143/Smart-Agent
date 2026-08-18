@@ -1,142 +1,163 @@
-import { useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
-import { Button, TextInput } from 'react-native-paper';
+import { useMemo, useState } from 'react';
+import { StyleSheet, Text } from 'react-native';
+import { Searchbar } from 'react-native-paper';
 import { router } from 'expo-router';
+import { AppButton } from '@/components/AppButton';
+import { AppInput } from '@/components/AppInput';
+import { EmptyState } from '@/components/EmptyState';
 import { ErrorBanner } from '@/components/ErrorBanner';
+import { LoadingState } from '@/components/LoadingState';
+import { ProviderSelector } from '@/components/ProviderSelector';
 import { Screen } from '@/components/Screen';
-import { colors } from '@/constants/theme';
-import { isAmazonMusicLive, providerDisplayName } from '@/constants/providers';
+import { TrackRow } from '@/components/TrackRow';
+import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useCreatePlaylist } from '@/hooks/usePlaylists';
 import { useProviders } from '@/hooks/useProviders';
-import type { ProviderId } from '@/types';
+import { useSearch } from '@/hooks/useSearch';
+import { useToast } from '@/components/ToastProvider';
+import { useAppTheme } from '@/theme/AppThemeProvider';
+import type { ProviderId, TrackResult } from '@/types';
+import { isDuplicateTrack, trackKey } from '@/utils/duplicates';
+import { formatDuration } from '@/utils/format';
 import { toUserMessage } from '@/utils/errors';
 
-const PROVIDERS: ProviderId[] = ['spotify', 'youtube', 'amazon_music'];
-
 export function CreatePlaylistScreen() {
+  const { colors } = useAppTheme();
+  const toast = useToast();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [language, setLanguage] = useState('');
-  const [genre, setGenre] = useState('');
-  const [mood, setMood] = useState('');
-  const [yearFrom, setYearFrom] = useState('');
-  const [yearTo, setYearTo] = useState('');
-  const [duration, setDuration] = useState('');
-  const [provider, setProvider] = useState<ProviderId>('spotify');
+  const [provider, setProvider] = useState<ProviderId | 'all' | 'both'>('spotify');
+  const [tracks, setTracks] = useState<TrackResult[]>([]);
+  const [query, setQuery] = useState('');
+  const debounced = useDebouncedValue(query, 400);
   const create = useCreatePlaylist();
   const providers = useProviders();
-  const amazonLive = isAmazonMusicLive(providers.data?.providers);
+  const search = useSearch(debounced, { provider: provider === 'both' ? 'all' : provider }, debounced.trim().length > 1);
   const selected = providers.data?.providers.find((item) => item.id === provider);
+  const totalMs = useMemo(
+    () => tracks.reduce((sum, track) => sum + (track.durationMs ?? 0), 0),
+    [tracks],
+  );
+
+  function addTrack(track: TrackResult): void {
+    if (isDuplicateTrack(tracks, track)) {
+      toast.show('That song is already in this playlist', 'info');
+      return;
+    }
+    setTracks((current) => [...current, track]);
+    toast.show('Song added', 'success');
+  }
+
+  function move(index: number, direction: -1 | 1): void {
+    const next = index + direction;
+    if (next < 0 || next >= tracks.length) {
+      return;
+    }
+    setTracks((current) => {
+      const copy = [...current];
+      const swap = copy[index];
+      const other = copy[next];
+      if (!swap || !other) {
+        return current;
+      }
+      copy[index] = other;
+      copy[next] = swap;
+      return copy;
+    });
+  }
 
   return (
     <Screen>
-      <Text style={styles.title}>Create Playlist</Text>
-      <TextInput label="Playlist Name" value={name} onChangeText={setName} style={styles.input} />
-      <TextInput
-        label="Description"
-        value={description}
-        onChangeText={setDescription}
-        style={styles.input}
-        multiline
+      <Text style={[styles.title, { color: colors.text }]}>Custom playlist</Text>
+      <AppInput label="Name" value={name} onChangeText={setName} />
+      <AppInput label="Description" value={description} onChangeText={setDescription} multiline />
+      <Text style={[styles.section, { color: colors.text }]}>Provider</Text>
+      <ProviderSelector
+        value={provider}
+        onChange={setProvider}
+        providers={providers.data?.providers}
+        requireConnected
       />
-      <TextInput label="Language" value={language} onChangeText={setLanguage} style={styles.input} />
-      <TextInput label="Genre" value={genre} onChangeText={setGenre} style={styles.input} />
-      <TextInput label="Mood" value={mood} onChangeText={setMood} style={styles.input} />
-      <View style={styles.row}>
-        <TextInput
-          label="Year From"
-          value={yearFrom}
-          onChangeText={setYearFrom}
-          style={[styles.input, styles.flex]}
-          keyboardType="number-pad"
-        />
-        <TextInput
-          label="Year To"
-          value={yearTo}
-          onChangeText={setYearTo}
-          style={[styles.input, styles.flex]}
-          keyboardType="number-pad"
-        />
-      </View>
-      <TextInput
-        label="Duration (minutes)"
-        value={duration}
-        onChangeText={setDuration}
-        style={styles.input}
-        keyboardType="number-pad"
-      />
-
-      <Text style={styles.section}>Provider selection</Text>
-      <View style={styles.row}>
-        {PROVIDERS.map((id) => {
-          const disabled = id === 'amazon_music' && !amazonLive;
-          return (
-            <Button
-              key={id}
-              mode={provider === id ? 'contained' : 'outlined'}
-              onPress={() => {
-                if (!disabled) {
-                  setProvider(id);
-                }
-              }}
-              disabled={disabled}
-              compact
-            >
-              {disabled ? 'Amazon Music — Coming Soon' : providerDisplayName(id)}
-            </Button>
-          );
-        })}
-      </View>
       {selected && !selected.connected ? (
         <ErrorBanner message={`Connect ${selected.name} in Settings before creating a playlist there.`} />
       ) : null}
-      {create.isError ? <ErrorBanner message={toUserMessage(create.error)} /> : null}
 
-      <Button
-        mode="contained"
-        disabled={!name.trim() || create.isPending || selected?.connected === false}
-        onPress={async () => {
-          const playlist = await create.mutateAsync({
-            name: name.trim(),
-            description: description.trim() || undefined,
-            language: language.trim() || undefined,
-            genre: genre.trim() || undefined,
-            mood: mood.trim() || undefined,
-            yearFrom: yearFrom ? Number(yearFrom) : undefined,
-            yearTo: yearTo ? Number(yearTo) : undefined,
-            targetDurationMs: duration ? Number(duration) * 60_000 : undefined,
-            targetProvider: provider,
-          });
-          router.push(`/playlist/${playlist.playlist.id}`);
+      <Text style={[styles.meta, { color: colors.cyan }]}>
+        {tracks.length} songs · {formatDuration(totalMs)}
+      </Text>
+
+      <Text style={[styles.section, { color: colors.text }]}>Add songs</Text>
+      <Searchbar
+        placeholder="Search songs, artists & albums"
+        value={query}
+        onChangeText={setQuery}
+        style={{ backgroundColor: colors.card }}
+        inputStyle={{ color: colors.text }}
+        placeholderTextColor={colors.muted}
+        accessibilityLabel="Search songs to add"
+      />
+      {search.isFetching ? <LoadingState label="Searching catalogs" /> : null}
+      {search.isError ? <ErrorBanner message={toUserMessage(search.error)} /> : null}
+      {(search.data?.tracks ?? []).map((track) => (
+        <TrackRow key={trackKey(track)} track={track} onAdd={() => addTrack(track)} />
+      ))}
+      {search.isSuccess && (search.data?.tracks.length ?? 0) === 0 ? (
+        <EmptyState title="No matching songs found" body="Try another title or artist." />
+      ) : null}
+
+      {tracks.map((track, index) => (
+        <TrackRow
+          key={trackKey(track)}
+          track={track}
+          onRemove={() => {
+            setTracks((current) => current.filter((item) => trackKey(item) !== trackKey(track)));
+            toast.show('Song removed', 'success');
+          }}
+          onMoveUp={index > 0 ? () => move(index, -1) : undefined}
+          onMoveDown={index < tracks.length - 1 ? () => move(index, 1) : undefined}
+        />
+      ))}
+
+      {create.isError ? <ErrorBanner message={toUserMessage(create.error)} /> : null}
+      <AppButton
+        label="Create Playlist"
+        loading={create.isPending}
+        disabled={!name.trim() || create.isPending || (typeof provider === 'string' && provider !== 'all' && provider !== 'both' && selected?.connected === false)}
+        onPress={() => {
+          if (provider === 'all' || provider === 'both') {
+            return;
+          }
+          void create
+            .mutateAsync({
+              name: name.trim(),
+              description: description.trim() || undefined,
+              targetProvider: provider,
+              tracks,
+            })
+            .then((result) => {
+              toast.show('Playlist created', 'success');
+              router.push(`/playlist/${result.playlist.id}`);
+            })
+            .catch((error: unknown) => {
+              toast.show(toUserMessage(error), 'error');
+            });
         }}
-      >
-        Create Playlist
-      </Button>
+      />
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
   title: {
-    color: colors.text,
     fontSize: 28,
     fontWeight: '800',
   },
-  input: {
-    backgroundColor: colors.card,
-    marginBottom: 4,
-  },
-  row: {
-    flexDirection: 'row',
-    gap: 8,
-    flexWrap: 'wrap',
-  },
-  flex: {
-    flex: 1,
-  },
   section: {
-    color: colors.text,
     fontWeight: '700',
     fontSize: 16,
+  },
+  meta: {
+    fontSize: 14,
+    fontWeight: '600',
   },
 });

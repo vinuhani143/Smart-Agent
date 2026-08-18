@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
+import { prisma } from '../config/prisma';
 import { parseProviderId } from '../providers/ProviderRegistry';
 import {
   addTrackToPlaylist,
@@ -72,7 +73,17 @@ export const convertSchema = z.object({
 
 export async function list(req: Request, res: Response): Promise<void> {
   const playlists = await listPlaylists(req.userId!);
-  res.json({ playlists: playlists.map(serializePlaylist) });
+  const generated = await prisma.playlistGeneration.findMany({
+    where: { userId: req.userId!, resultPlaylistId: { not: null } },
+    select: { resultPlaylistId: true },
+  });
+  const aiIds = new Set(generated.map((row) => row.resultPlaylistId));
+  res.json({
+    playlists: playlists.map((playlist) => ({
+      ...serializePlaylist(playlist),
+      aiGenerated: aiIds.has(playlist.id),
+    })),
+  });
 }
 
 export async function create(req: Request, res: Response): Promise<void> {

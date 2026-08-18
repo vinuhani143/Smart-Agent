@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { PlaylistGeneratorService } from '../ai/playlistGeneratorService';
+import { describeAiConfig } from '../ai/configurableLlmProvider';
 import { AppError, ErrorCode } from '../types/errors';
 import type { TrackResult } from '../types/provider';
 
@@ -182,4 +183,8 @@ export async function confirmGeneratedPlaylist(req: Request, res: Response): Pro
     destination,
   );
   res.json({ playlistId: result.playlistId, confirmationRequired: false });
+}
+
+export async function getAiStatus(_req: Request, res: Response): Promise<void> {
+  res.json(describeAiConfig());
 }

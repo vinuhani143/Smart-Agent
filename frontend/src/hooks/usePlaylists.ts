@@ -46,6 +46,33 @@ export function useAddTrack() {
   });
 }
 
+export function useUpdatePlaylist() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { playlistId: string; name?: string; description?: string }) =>
+      apiFetch<{ playlist: PlaylistSummary }>(`/api/playlists/${input.playlistId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ name: input.name, description: input.description }),
+      }),
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({ queryKey: ['playlists', variables.playlistId] });
+      void queryClient.invalidateQueries({ queryKey: ['playlists'] });
+    },
+  });
+}
+
+export function useRemoveTrack() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { playlistId: string; trackId: string }) =>
+      apiFetch(`/api/playlists/${input.playlistId}/tracks/${input.trackId}`, { method: 'DELETE' }),
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({ queryKey: ['playlists', variables.playlistId] });
+      void queryClient.invalidateQueries({ queryKey: ['playlists'] });
+    },
+  });
+}
+
 export function useDeletePlaylist() {
   const queryClient = useQueryClient();
   return useMutation({

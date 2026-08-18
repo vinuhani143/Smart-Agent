@@ -1,12 +1,17 @@
 import { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { Button, Searchbar } from 'react-native-paper';
 import { router } from 'expo-router';
+import { AppButton } from '@/components/AppButton';
+import { AppCard } from '@/components/AppCard';
+import { AppInput } from '@/components/AppInput';
+import { BottomSheet } from '@/components/BottomSheet';
+import { Chip } from '@/components/Chip';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorBanner } from '@/components/ErrorBanner';
+import { LoadingState } from '@/components/LoadingState';
+import { MatchConfidenceBadge } from '@/components/MatchConfidenceBadge';
 import { Screen } from '@/components/Screen';
-import { TrackCard } from '@/components/TrackCard';
-import { colors } from '@/constants/theme';
+import { TrackRow } from '@/components/TrackRow';
 import {
   useAnalyzeConversion,
   useConfirmConversion,
@@ -15,8 +20,11 @@ import {
   useRemotePlaylists,
   type ConversionDecision,
 } from '@/hooks/useConversion';
+import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useProviders } from '@/hooks/useProviders';
+import { useToast } from '@/components/ToastProvider';
 import { isAmazonMusicLive, providerDisplayName } from '@/constants/providers';
+import { useAppTheme } from '@/theme/AppThemeProvider';
 import type {
   ConversionMatch,
   ConversionMatchStatus,
@@ -28,6 +36,7 @@ import { toUserMessage } from '@/utils/errors';
 
 type Phase = 'setup' | 'review' | 'summary' | 'done';
 const CONVERTIBLE: ConvertibleProvider[] = ['spotify', 'youtube', 'amazon_music'];
+const STEPS = ['Source', 'Playlist', 'Destination', 'Analyze', 'Review', 'Confirm', 'Create'];
 
 function fallbackDestination(
   current: ConvertibleProvider,
@@ -40,23 +49,16 @@ function fallbackDestination(
   return current === 'spotify' ? 'youtube' : 'spotify';
 }
 
-function statusGlyph(status: ConversionMatchStatus, confidence: number): { mark: string; color: string; label: string } {
-  if (status === 'matched' || status === 'accepted' || status === 'manual') {
-    return { mark: '✓', color: colors.success, label: `${confidence}%` };
-  }
-  if (status === 'needs_review') {
-    return { mark: '⚠', color: colors.warning, label: confidence > 0 ? `${confidence}% possible match` : 'Needs review' };
-  }
-  if (status === 'duplicate') {
-    return { mark: '⧉', color: colors.muted, label: 'Duplicate' };
-  }
-  if (status === 'skipped') {
-    return { mark: '–', color: colors.muted, label: 'Skipped' };
-  }
-  return { mark: '✕', color: colors.danger, label: 'Not Found' };
+function stepIndex(phase: Phase): number {
+  if (phase === 'review') return 4;
+  if (phase === 'summary') return 5;
+  if (phase === 'done') return 6;
+  return 0;
 }
 
 export function ConvertPlaylistScreen() {
+  const { colors } = useAppTheme();
+  const toast = useToast();
   const providers = useProviders();
   const [phase, setPhase] = useState<Phase>('setup');
   const [sourceProvider, setSourceProvider] = useState<ConvertibleProvider>('spotify');
@@ -68,32 +70,28 @@ export function ConvertPlaylistScreen() {
   const [pickerFor, setPickerFor] = useState<ConversionMatch | null>(null);
   const [manualFor, setManualFor] = useState<ConversionMatch | null>(null);
   const [manualQuery, setManualQuery] = useState('');
-  const [submittedManual, setSubmittedManual] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   const remote = useRemotePlaylists(sourceProvider);
   const analyze = useAnalyzeConversion();
   const confirm = useConfirmConversion();
   const create = useCreateConversion();
-  const manualSearch = useDestinationSearch(destinationProvider, submittedManual, Boolean(manualFor));
+  const debouncedManual = useDebouncedValue(manualQuery, 400);
+  const manualSearch = useDestinationSearch(
+    destinationProvider,
+    debouncedManual,
+    Boolean(manualFor) && debouncedManual.trim().length > 1,
+  );
 
   const connected = (id: ConvertibleProvider): boolean =>
     Boolean(providers.data?.providers.find((item) => item.id === id)?.connected);
 
   const amazonLive = isAmazonMusicLive(providers.data?.providers);
-
   const comingSoon = (id: ConvertibleProvider): boolean => id === 'amazon_music' && !amazonLive;
-
-  const selectable = (id: ConvertibleProvider): boolean => {
-    if (comingSoon(id)) {
-      return false;
-    }
-    return connected(id);
-  };
-
+  const selectable = (id: ConvertibleProvider): boolean => !comingSoon(id) && connected(id);
   const selectableIds = CONVERTIBLE.filter((id) => selectable(id));
-
   const sameService = sourceProvider === destinationProvider;
+  const currentStep = phase === 'setup' ? (sourcePlaylistId ? 2 : 0) : stepIndex(phase);
 
   function setDecision(decision: ConversionDecision): void {
     setDecisions((current) => ({ ...current, [decision.sourceTrackId]: decision }));
@@ -192,6 +190,7 @@ export function ConvertPlaylistScreen() {
       });
       setConversion(created);
       setPhase('done');
+      toast.show('Playlist converted', 'success');
     } catch (err) {
       setError(toUserMessage(err));
     }
@@ -199,20 +198,41 @@ export function ConvertPlaylistScreen() {
 
   return (
     <Screen>
-      <Text style={styles.title}>Convert Playlist</Text>
-      <Text style={styles.body}>
+      <Text style={[styles.title, { color: colors.text }]}>Convert Playlist</Text>
+      <Text style={[styles.body, { color: colors.muted }]}>
         Match songs through official APIs. The destination playlist is not created until you confirm.
       </Text>
+      <View style={styles.steps} accessibilityLabel={`Step ${currentStep + 1} of ${STEPS.length}`}>
+        {STEPS.map((label, index) => (
+          <Text
+            key={label}
+            style={[
+              styles.stepChip,
+              {
+                color: index <= currentStep ? colors.text : colors.muted,
+                backgroundColor: index <= currentStep ? colors.accentMuted : colors.elevated,
+              },
+            ]}
+          >
+            {index + 1}. {label}
+          </Text>
+        ))}
+      </View>
       {error ? <ErrorBanner message={error} /> : null}
 
       {phase === 'setup' ? (
         <>
-          <Text style={styles.step}>Step 1: Select Source</Text>
+          <Text style={[styles.step, { color: colors.text }]}>Select Source</Text>
           <View style={styles.row}>
             {CONVERTIBLE.map((id) => (
-              <Button
+              <Chip
                 key={id}
-                mode={sourceProvider === id ? 'contained' : 'outlined'}
+                label={
+                  comingSoon(id)
+                    ? 'Amazon Music — Coming Soon'
+                    : `${providerDisplayName(id)}${!connected(id) ? ' (connect)' : ''}`
+                }
+                active={sourceProvider === id}
                 disabled={!selectable(id)}
                 onPress={() => {
                   setSourceProvider(id);
@@ -221,251 +241,263 @@ export function ConvertPlaylistScreen() {
                     setDestinationProvider(fallbackDestination(id, selectableIds));
                   }
                 }}
-              >
-                {comingSoon(id)
-                  ? 'Amazon Music — Coming Soon'
-                  : `${providerDisplayName(id)}${!connected(id) ? ' (connect)' : ''}`}
-              </Button>
+              />
             ))}
           </View>
 
-          <Text style={styles.step}>Step 2: Select Playlist</Text>
+          <Text style={[styles.step, { color: colors.text }]}>Select Playlist</Text>
+          {remote.isFetching ? <LoadingState label="Loading playlists" /> : null}
           {remote.isError ? <ErrorBanner message={toUserMessage(remote.error)} /> : null}
           {(remote.data?.playlists ?? []).map((playlist) => (
-            <Button
+            <AppCard
               key={playlist.providerPlaylistId}
-              mode={sourcePlaylistId === playlist.providerPlaylistId ? 'contained' : 'outlined'}
               onPress={() => setSourcePlaylistId(playlist.providerPlaylistId)}
-              style={styles.choice}
+              accessibilityLabel={playlist.name}
+              style={
+                sourcePlaylistId === playlist.providerPlaylistId
+                  ? { borderColor: colors.accent }
+                  : undefined
+              }
             >
-              {playlist.name}
-              {playlist.trackCount !== undefined ? ` (${playlist.trackCount})` : ''}
-            </Button>
+              <Text style={[styles.song, { color: colors.text }]}>{playlist.name}</Text>
+              <Text style={[styles.artist, { color: colors.muted }]}>
+                {playlist.trackCount !== undefined ? `${playlist.trackCount} songs` : providerDisplayName(sourceProvider)}
+              </Text>
+            </AppCard>
           ))}
           {remote.isSuccess && (remote.data?.playlists.length ?? 0) === 0 ? (
-            <EmptyState title="No playlists" body={`No ${providerDisplayName(sourceProvider)} playlists were returned.`} />
+            <EmptyState
+              title="No playlists"
+              body={`Connect ${providerDisplayName(sourceProvider)} to see your playlists, or pick another source.`}
+              actionLabel="Open Settings"
+              onAction={() => router.push('/(tabs)/settings')}
+            />
           ) : null}
 
-          <Text style={styles.step}>Step 3: Select Destination</Text>
+          <Text style={[styles.step, { color: colors.text }]}>Select Destination</Text>
           <View style={styles.row}>
             {CONVERTIBLE.map((id) => (
-              <Button
+              <Chip
                 key={id}
-                mode={destinationProvider === id ? 'contained' : 'outlined'}
+                label={comingSoon(id) ? 'Amazon Music — Coming Soon' : providerDisplayName(id)}
+                active={destinationProvider === id}
                 disabled={!selectable(id) || (id === sourceProvider && !allowSameProvider)}
                 onPress={() => setDestinationProvider(id)}
-              >
-                {comingSoon(id) ? 'Amazon Music — Coming Soon' : providerDisplayName(id)}
-              </Button>
+              />
             ))}
           </View>
-          <Pressable onPress={() => setAllowSameProvider((value) => !value)}>
-            <Text style={styles.link}>
+          <Pressable
+            onPress={() => setAllowSameProvider((value) => !value)}
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: allowSameProvider }}
+            style={styles.check}
+          >
+            <Text style={[styles.link, { color: colors.cyan }]}>
               {allowSameProvider ? '☑' : '☐'} Duplicate this playlist on the same service
             </Text>
           </Pressable>
           {sameService && !allowSameProvider ? (
-            <Text style={styles.hint}>Same-service copies are blocked unless you duplicate.</Text>
+            <Text style={[styles.hint, { color: colors.warning }]}>Same-service copies are blocked unless you duplicate.</Text>
           ) : null}
 
-          <Text style={styles.step}>Step 4: Analyze Playlist</Text>
-          <Button
-            mode="contained"
+          <Text style={[styles.step, { color: colors.text }]}>Analyze</Text>
+          {analyze.isPending ? <LoadingState label="Analyzing playlist…" /> : null}
+          <AppButton
+            label="Find Matching Songs"
             loading={analyze.isPending}
             disabled={!sourcePlaylistId || analyze.isPending || (sameService && !allowSameProvider)}
             onPress={() => void runAnalyze()}
-          >
-            Find Matching Songs
-          </Button>
+          />
         </>
       ) : null}
 
       {phase === 'review' && conversion ? (
         <>
-          <Button mode="outlined" onPress={() => setPhase('setup')}>
-            Back
-          </Button>
-          <Button mode="contained" onPress={() => setPhase('summary')}>
-            Accept all high-confidence matches
-          </Button>
+          <AppButton label="Back" variant="secondary" onPress={() => setPhase('setup')} />
+          <AppButton label="Accept all high-confidence matches" onPress={() => setPhase('summary')} />
           {conversion.matches.map((match) => {
             const status = effectiveStatus(match);
-            const glyph = statusGlyph(status, match.confidence);
             const dest = effectiveDestination(match);
             const sourceTitle =
               match.sourceTrack.metadataConfidence !== undefined && match.sourceTrack.metadataConfidence < 80
                 ? (match.sourceTrack.originalTitle ?? match.sourceTrack.title)
                 : match.sourceTrack.title;
             return (
-              <View key={match.id} style={styles.card}>
-                <Text style={[styles.glyph, { color: glyph.color }]}>
-                  {glyph.mark} {glyph.label}
-                </Text>
-                <Text style={styles.matchMethod}>{match.matchMethod ?? 'unmatched'}</Text>
-                <Text style={styles.sourceLabel}>Source</Text>
-                <Text style={styles.song}>{sourceTitle}</Text>
-                <Text style={styles.artist}>{match.sourceTrack.artist}</Text>
+              <AppCard key={match.id}>
+                <MatchConfidenceBadge status={status} confidence={match.confidence} />
+                <Text style={[styles.matchMethod, { color: colors.muted }]}>{match.matchMethod ?? 'unmatched'}</Text>
+                <Text style={[styles.sourceLabel, { color: colors.muted }]}>Source</Text>
+                <Text style={[styles.song, { color: colors.text }]}>{sourceTitle}</Text>
+                <Text style={[styles.artist, { color: colors.muted }]}>{match.sourceTrack.artist}</Text>
                 {dest && status !== 'not_found' && status !== 'skipped' ? (
                   <>
-                    <Text style={styles.sourceLabel}>Destination</Text>
-                    <Text style={styles.song}>{dest.title}</Text>
-                    <Text style={styles.artist}>{dest.artist}</Text>
+                    <Text style={[styles.sourceLabel, { color: colors.muted }]}>Destination</Text>
+                    <Text style={[styles.song, { color: colors.text }]}>{dest.title}</Text>
+                    <Text style={[styles.artist, { color: colors.muted }]}>{dest.artist}</Text>
                   </>
                 ) : null}
                 <View style={styles.row}>
                   {dest && status !== 'skipped' && status !== 'duplicate' ? (
-                    <Button compact onPress={() => setDecision({ sourceTrackId: match.sourceTrackId, action: 'accept', destinationTrack: dest })}>
-                      Accept Match
-                    </Button>
+                    <Chip
+                      label="Accept"
+                      onPress={() => setDecision({ sourceTrackId: match.sourceTrackId, action: 'accept', destinationTrack: dest })}
+                    />
                   ) : null}
-                  <Button compact onPress={() => setPickerFor(match)}>
-                    Choose Alternative
-                  </Button>
-                  <Button compact onPress={() => setDecision({ sourceTrackId: match.sourceTrackId, action: 'skip' })}>
-                    Skip
-                  </Button>
-                  <Button compact onPress={() => {
-                    setManualFor(match);
-                    setManualQuery(`${match.sourceTrack.title} ${match.sourceTrack.artist}`);
-                    setSubmittedManual('');
-                  }}>
-                    Search Manually
-                  </Button>
+                  <Chip label="Choose alternative" onPress={() => setPickerFor(match)} />
+                  <Chip label="Skip" onPress={() => setDecision({ sourceTrackId: match.sourceTrackId, action: 'skip' })} />
+                  <Chip
+                    label="Search replacement"
+                    onPress={() => {
+                      setManualFor(match);
+                      setManualQuery(`${match.sourceTrack.title} ${match.sourceTrack.artist}`);
+                    }}
+                  />
                 </View>
-              </View>
+              </AppCard>
             );
           })}
-          <Button mode="contained" onPress={() => setPhase('summary')}>
-            Continue to summary
-          </Button>
+          <AppButton label="Continue to summary" onPress={() => setPhase('summary')} />
         </>
       ) : null}
 
       {phase === 'summary' && conversion ? (
         <>
-          <Text style={styles.step}>Conversion summary</Text>
-          <Text style={styles.body}>Total source tracks: {reviewSummary.totalTracks}</Text>
-          <Text style={styles.body}>Matched: {reviewSummary.matchedTracks}</Text>
-          <Text style={styles.body}>Needs review: {reviewSummary.reviewTracks}</Text>
-          <Text style={styles.body}>Not found: {reviewSummary.notFoundTracks}</Text>
-          <Text style={styles.body}>Duplicates: {reviewSummary.duplicateTracks}</Text>
-          <Text style={styles.song}>Destination playlist will contain: {reviewSummary.destinationTrackCount} tracks</Text>
+          <Text style={[styles.step, { color: colors.text }]}>Confirm</Text>
+          <AppCard>
+            <Text style={[styles.body, { color: colors.muted }]}>Total source tracks: {reviewSummary.totalTracks}</Text>
+            <Text style={[styles.body, { color: colors.muted }]}>Matched: {reviewSummary.matchedTracks}</Text>
+            <Text style={[styles.body, { color: colors.muted }]}>Needs review: {reviewSummary.reviewTracks}</Text>
+            <Text style={[styles.body, { color: colors.muted }]}>Not found: {reviewSummary.notFoundTracks}</Text>
+            <Text style={[styles.body, { color: colors.muted }]}>Duplicates: {reviewSummary.duplicateTracks}</Text>
+            <Text style={[styles.song, { color: colors.text }]}>
+              Destination playlist will contain: {reviewSummary.destinationTrackCount} tracks
+            </Text>
+          </AppCard>
           <View style={styles.row}>
-            <Button mode="outlined" onPress={() => setPhase('review')}>
-              Back
-            </Button>
-            <Button
-              mode="contained"
-              loading={confirm.isPending || create.isPending}
-              disabled={confirm.isPending || create.isPending || reviewSummary.destinationTrackCount === 0}
-              onPress={() => void runCreate()}
-            >
-              Create Playlist
-            </Button>
+            <View style={styles.flex}>
+              <AppButton label="Back" variant="secondary" onPress={() => setPhase('review')} />
+            </View>
+            <View style={styles.flex}>
+              <AppButton
+                label="Create Playlist"
+                loading={confirm.isPending || create.isPending}
+                disabled={confirm.isPending || create.isPending || reviewSummary.destinationTrackCount === 0}
+                onPress={() => void runCreate()}
+              />
+            </View>
           </View>
         </>
       ) : null}
 
       {phase === 'done' && conversion ? (
         <>
-          <Text style={styles.song}>{conversion.createdMessage ?? 'Playlist created.'}</Text>
+          <Text style={[styles.song, { color: colors.text }]}>{conversion.createdMessage ?? 'Playlist created.'}</Text>
           {conversion.errorMessage ? <ErrorBanner message={conversion.errorMessage} /> : null}
-          <Button mode="contained" onPress={() => {
-            if (conversion.localPlaylistId) {
-              router.push(`/playlist/${conversion.localPlaylistId}`);
-              return;
-            }
-            router.push('/(tabs)/playlists');
-          }}>
-            View playlists
-          </Button>
-          <Button mode="outlined" onPress={() => {
-            setPhase('setup');
-            setConversion(null);
-            setDecisions({});
-          }}>
-            Convert another
-          </Button>
+          <AppButton
+            label="View playlists"
+            onPress={() => {
+              if (conversion.localPlaylistId) {
+                router.push(`/playlist/${conversion.localPlaylistId}`);
+                return;
+              }
+              router.push('/(tabs)/playlists');
+            }}
+          />
+          <AppButton
+            label="Convert another"
+            variant="secondary"
+            onPress={() => {
+              setPhase('setup');
+              setConversion(null);
+              setDecisions({});
+            }}
+          />
         </>
       ) : null}
 
-      {pickerFor ? (
-        <View style={styles.overlay}>
-          <Text style={styles.step}>Possible Matches</Text>
-          <Text style={styles.body}>
-            {pickerFor.sourceTrack.title} — {pickerFor.sourceTrack.artist}
-          </Text>
-          {(pickerFor.destinationTrack
-            ? [{ track: pickerFor.destinationTrack, confidence: pickerFor.confidence }, ...pickerFor.alternatives]
-            : pickerFor.alternatives
-          ).map((item) => (
-            <TrackCard
-              key={item.track.providerTrackId}
-              track={item.track}
-              confidence={item.confidence}
-              actionLabel="Select"
-              onSelect={() => {
-                setDecision({
-                  sourceTrackId: pickerFor.sourceTrackId,
-                  action: 'select_alternative',
-                  destinationTrack: item.track,
-                });
-                setPickerFor(null);
-              }}
-            />
-          ))}
-          <Button onPress={() => setPickerFor(null)}>Cancel</Button>
-        </View>
-      ) : null}
-
-      {manualFor ? (
-        <View style={styles.overlay}>
-          <Text style={styles.step}>Search Manually</Text>
-          <Searchbar
-            placeholder="Song title, artist"
-            value={manualQuery}
-            onChangeText={setManualQuery}
-            onSubmitEditing={() => setSubmittedManual(manualQuery.trim())}
-            onIconPress={() => setSubmittedManual(manualQuery.trim())}
-            style={styles.search}
-            inputStyle={{ color: colors.text }}
-            placeholderTextColor={colors.muted}
+      <BottomSheet visible={Boolean(pickerFor)} title="Possible Matches" onClose={() => setPickerFor(null)}>
+        <Text style={[styles.body, { color: colors.muted }]}>
+          {pickerFor?.sourceTrack.title} — {pickerFor?.sourceTrack.artist}
+        </Text>
+        {(pickerFor?.destinationTrack
+          ? [{ track: pickerFor.destinationTrack, confidence: pickerFor.confidence }, ...pickerFor.alternatives]
+          : pickerFor?.alternatives ?? []
+        ).map((item) => (
+          <TrackRow
+            key={item.track.providerTrackId}
+            track={item.track}
+            confidence={item.confidence}
+            actionLabel="Select"
+            onSelect={() => {
+              if (!pickerFor) {
+                return;
+              }
+              setDecision({
+                sourceTrackId: pickerFor.sourceTrackId,
+                action: 'select_alternative',
+                destinationTrack: item.track,
+              });
+              setPickerFor(null);
+            }}
           />
-          {manualSearch.isError ? <ErrorBanner message={toUserMessage(manualSearch.error)} /> : null}
-          {(manualSearch.data?.tracks ?? []).map((track) => (
-            <TrackCard
-              key={track.providerTrackId}
-              track={track}
-              actionLabel="Select"
-              onSelect={() => {
-                setDecision({
-                  sourceTrackId: manualFor.sourceTrackId,
-                  action: 'manual',
-                  destinationTrack: track,
-                });
-                setManualFor(null);
-              }}
-            />
-          ))}
-          <Button onPress={() => setManualFor(null)}>Cancel</Button>
-        </View>
-      ) : null}
+        ))}
+      </BottomSheet>
+
+      <BottomSheet visible={Boolean(manualFor)} title="Search replacement" onClose={() => setManualFor(null)}>
+        <AppInput
+          label="Search destination catalog"
+          placeholder="Song title, artist"
+          value={manualQuery}
+          onChangeText={setManualQuery}
+          autoCorrect={false}
+          returnKeyType="search"
+        />
+        {manualSearch.isFetching ? <LoadingState label="Searching" /> : null}
+        {manualSearch.isError ? <ErrorBanner message={toUserMessage(manualSearch.error)} /> : null}
+        {(manualSearch.data?.tracks ?? []).map((track) => (
+          <TrackRow
+            key={track.providerTrackId}
+            track={track}
+            actionLabel="Select"
+            onSelect={() => {
+              if (!manualFor) {
+                return;
+              }
+              setDecision({
+                sourceTrackId: manualFor.sourceTrackId,
+                action: 'manual',
+                destinationTrack: track,
+              });
+              setManualFor(null);
+            }}
+          />
+        ))}
+      </BottomSheet>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
   title: {
-    color: colors.text,
     fontSize: 28,
     fontWeight: '800',
   },
   body: {
-    color: colors.muted,
     lineHeight: 20,
   },
+  steps: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  stepChip: {
+    fontSize: 11,
+    fontWeight: '700',
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
   step: {
-    color: colors.text,
     fontWeight: '700',
     fontSize: 16,
   },
@@ -474,58 +506,33 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 8,
   },
-  choice: {
-    alignSelf: 'flex-start',
+  flex: {
+    flex: 1,
   },
   link: {
-    color: colors.cyan,
     fontWeight: '600',
   },
   hint: {
-    color: colors.warning,
     fontSize: 13,
   },
-  card: {
-    backgroundColor: colors.card,
-    borderRadius: 16,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: colors.border,
-    gap: 4,
-  },
-  glyph: {
-    fontWeight: '800',
-    fontSize: 16,
+  check: {
+    minHeight: 44,
+    justifyContent: 'center',
   },
   matchMethod: {
-    color: colors.muted,
     fontSize: 12,
     textTransform: 'capitalize',
   },
   sourceLabel: {
-    color: colors.muted,
     fontSize: 11,
     textTransform: 'uppercase',
     marginTop: 6,
   },
   song: {
-    color: colors.text,
     fontWeight: '700',
     fontSize: 16,
   },
   artist: {
-    color: colors.muted,
-  },
-  overlay: {
-    backgroundColor: colors.elevated,
-    borderRadius: 16,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: colors.border,
-    gap: 8,
-  },
-  search: {
-    backgroundColor: colors.card,
-    borderRadius: 16,
+    fontSize: 14,
   },
 });

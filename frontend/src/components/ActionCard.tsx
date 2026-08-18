@@ -1,5 +1,5 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { colors } from '@/constants/theme';
+import { useAppTheme } from '@/theme/AppThemeProvider';
 
 interface ActionCardProps {
   emoji: string;
@@ -9,12 +9,23 @@ interface ActionCardProps {
 }
 
 export function ActionCard({ emoji, title, subtitle, onPress }: ActionCardProps) {
+  const { colors } = useAppTheme();
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.card, pressed && styles.pressed]}>
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={title}
+      accessibilityHint={subtitle}
+      style={({ pressed }) => [
+        styles.card,
+        { backgroundColor: colors.card, borderColor: colors.border },
+        pressed && { opacity: 0.88, transform: [{ scale: 0.98 }] },
+      ]}
+    >
       <Text style={styles.emoji}>{emoji}</Text>
       <View style={styles.copy}>
-        <Text style={styles.title}>{title}</Text>
-        <Text style={styles.subtitle}>{subtitle}</Text>
+        <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
+        <Text style={[styles.subtitle, { color: colors.muted }]}>{subtitle}</Text>
       </View>
     </Pressable>
   );
@@ -23,17 +34,11 @@ export function ActionCard({ emoji, title, subtitle, onPress }: ActionCardProps)
 const styles = StyleSheet.create({
   card: {
     flex: 1,
-    minHeight: 120,
-    backgroundColor: colors.card,
+    minHeight: 128,
     borderRadius: 20,
     padding: 16,
     borderWidth: 1,
-    borderColor: colors.border,
     justifyContent: 'space-between',
-  },
-  pressed: {
-    opacity: 0.85,
-    transform: [{ scale: 0.98 }],
   },
   emoji: {
     fontSize: 28,
@@ -42,12 +47,11 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   title: {
-    color: colors.text,
     fontSize: 16,
     fontWeight: '700',
   },
   subtitle: {
-    color: colors.muted,
     fontSize: 12,
+    lineHeight: 16,
   },
 });

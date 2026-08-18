@@ -1,105 +1,154 @@
 import { useLocalSearchParams, router } from 'expo-router';
-import { Alert, Image, StyleSheet, Text, View } from 'react-native';
-import { Button } from 'react-native-paper';
+import { Image, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useState } from 'react';
+import { AppButton } from '@/components/AppButton';
+import { AppInput } from '@/components/AppInput';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { EmptyState } from '@/components/EmptyState';
-import { ErrorBanner } from '@/components/ErrorBanner';
+import { ErrorState } from '@/components/ErrorState';
+import { LoadingState } from '@/components/LoadingState';
 import { Screen } from '@/components/Screen';
-import { colors } from '@/constants/theme';
-import { useDeletePlaylist, usePlaylist } from '@/hooks/usePlaylists';
-import { useUiStore } from '@/store/uiStore';
+import { useDeletePlaylist, usePlaylist, useRemoveTrack, useUpdatePlaylist } from '@/hooks/usePlaylists';
+import { useToast } from '@/components/ToastProvider';
+import { useAppTheme } from '@/theme/AppThemeProvider';
 import { formatDuration, formatTrackCount } from '@/utils/format';
 import { toUserMessage } from '@/utils/errors';
 
 export function PlaylistDetailScreen() {
+  const { colors } = useAppTheme();
+  const toast = useToast();
   const { id } = useLocalSearchParams<{ id: string }>();
   const playlistQuery = usePlaylist(id);
   const remove = useDeletePlaylist();
-  const setAddTargetPlaylistId = useUiStore((state) => state.setAddTargetPlaylistId);
+  const update = useUpdatePlaylist();
+  const removeTrack = useRemoveTrack();
   const playlist = playlistQuery.data?.playlist;
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [pendingTrackId, setPendingTrackId] = useState<string | null>(null);
 
   return (
     <Screen>
-      {playlistQuery.isError ? <ErrorBanner message={toUserMessage(playlistQuery.error)} /> : null}
+      {playlistQuery.isLoading ? <LoadingState label="Loading playlist" /> : null}
+      {playlistQuery.isError ? (
+        <ErrorState message={toUserMessage(playlistQuery.error)} onRetry={() => void playlistQuery.refetch()} />
+      ) : null}
       {playlist ? (
         <>
           {playlist.coverImageUrl ? (
-            <Image source={{ uri: playlist.coverImageUrl }} style={styles.cover} />
+            <Image source={{ uri: playlist.coverImageUrl }} style={styles.cover} accessibilityIgnoresInvertColors />
           ) : (
-            <View style={[styles.cover, styles.coverFallback]}>
+            <View style={[styles.cover, styles.coverFallback, { backgroundColor: colors.card }]}>
               <Ionicons name="albums" size={48} color={colors.accent} />
             </View>
           )}
-          <Text style={styles.name}>{playlist.name}</Text>
-          <Text style={styles.meta}>
-            {formatTrackCount(playlist.trackCount)} · {formatDuration(playlist.totalDurationMs)}
-          </Text>
-          {playlist.description ? <Text style={styles.description}>{playlist.description}</Text> : null}
+          {editing ? (
+            <>
+              <AppInput label="Name" value={name} onChangeText={setName} />
+              <AppInput label="Description" value={description} onChangeText={setDescription} multiline />
+              <AppButton
+                label="Save"
+                onPress={() => {
+                  if (!id) {
+                    return;
+                  }
+                  void update.mutateAsync({ playlistId: id, name: name.trim(), description: description.trim() }).then(() => {
+                    setEditing(false);
+                    toast.show('Playlist saved', 'success');
+                  });
+                }}
+                loading={update.isPending}
+              />
+            </>
+          ) : (
+            <>
+              <Text style={[styles.name, { color: colors.text }]}>{playlist.name}</Text>
+              <Text style={[styles.meta, { color: colors.muted }]}>
+                {formatTrackCount(playlist.trackCount)} · {formatDuration(playlist.totalDurationMs)}
+              </Text>
+              {playlist.description ? <Text style={[styles.description, { color: colors.muted }]}>{playlist.description}</Text> : null}
+            </>
+          )}
 
           <View style={styles.actions}>
-            <Button
-              mode="contained"
+            <AppButton
+              label="Play"
               onPress={() => {
-                if (!playlist.sourcePlaylistId) {
-                  Alert.alert(
-                    'Not on a music service yet',
-                    'Create this playlist on Spotify, YouTube, or Amazon Music first, then you can open it there.',
-                  );
-                  return;
-                }
-                Alert.alert('Play', 'MusicMix opens playlists on the official service. It does not stream or download audio itself.');
+                toast.show(
+                  playlist.sourcePlaylistId
+                    ? 'Open this playlist on the official music service. MusicMix does not stream audio.'
+                    : 'Create this playlist on a music service first, then you can open it there.',
+                  'info',
+                );
               }}
-            >
-              Play
-            </Button>
-            <Button
-              mode="outlined"
+            />
+            <AppButton
+              label="Edit"
+              variant="secondary"
               onPress={() => {
-                if (id) {
-                  setAddTargetPlaylistId(id);
-                  router.push('/(tabs)/search');
-                }
+                setName(playlist.name);
+                setDescription(playlist.description ?? '');
+                setEditing(true);
               }}
-            >
-              Add Songs
-            </Button>
-            <Button mode="outlined" onPress={() => router.push('/convert')}>
-              Convert
-            </Button>
-            <Button
-              mode="outlined"
-              textColor={colors.danger}
-              onPress={() => {
-                Alert.alert('Delete playlist', 'This removes the MusicMix playlist, not the copy on Spotify, YouTube, or Amazon Music.', [
-                  { text: 'Cancel', style: 'cancel' },
-                  {
-                    text: 'Delete',
-                    style: 'destructive',
-                    onPress: () => {
-                      if (id) {
-                        void remove.mutateAsync(id).then(() => router.replace('/(tabs)/playlists'));
-                      }
-                    },
-                  },
-                ]);
-              }}
-            >
-              Delete
-            </Button>
+            />
+            <AppButton label="Convert" variant="secondary" onPress={() => router.push('/convert')} />
+            <AppButton label="Delete" variant="danger" onPress={() => setConfirmDelete(true)} />
           </View>
 
           {(playlist.tracks ?? []).map((track) => (
-            <View key={track.id} style={styles.trackRow}>
-              <Text style={styles.trackTitle}>{track.title}</Text>
-              <Text style={styles.trackArtist}>
-                {track.artist} · {formatDuration(track.durationMs)}
-              </Text>
+            <View key={track.id} style={[styles.trackRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <View style={styles.flex}>
+                <Text style={[styles.trackTitle, { color: colors.text }]}>{track.title}</Text>
+                <Text style={[styles.trackArtist, { color: colors.muted }]}>
+                  {track.artist} · {formatDuration(track.durationMs)}
+                </Text>
+              </View>
+              <AppButton label="Remove" variant="ghost" onPress={() => setPendingTrackId(track.id)} />
             </View>
           ))}
+          {(playlist.tracks ?? []).length === 0 ? (
+            <EmptyState
+              title="No songs yet"
+              body="Add songs from Search or rebuild this playlist with AI."
+              actionLabel="Search songs"
+              onAction={() => router.push('/(tabs)/search')}
+            />
+          ) : null}
         </>
-      ) : playlistQuery.isLoading ? (
-        <EmptyState title="Loading" body="Fetching playlist…" />
       ) : null}
+
+      <ConfirmDialog
+        visible={confirmDelete}
+        title="Delete playlist"
+        message="This removes the MusicMix playlist, not the copy on Spotify, YouTube, or Amazon Music."
+        confirmLabel="Delete"
+        danger
+        onCancel={() => setConfirmDelete(false)}
+        onConfirm={() => {
+          setConfirmDelete(false);
+          if (id) {
+            void remove.mutateAsync(id).then(() => router.replace('/(tabs)/playlists'));
+          }
+        }}
+      />
+      <ConfirmDialog
+        visible={Boolean(pendingTrackId)}
+        title="Remove song"
+        message="Remove this song from the MusicMix playlist?"
+        confirmLabel="Remove"
+        danger
+        onCancel={() => setPendingTrackId(null)}
+        onConfirm={() => {
+          if (id && pendingTrackId) {
+            const trackId = pendingTrackId;
+            setPendingTrackId(null);
+            void removeTrack.mutateAsync({ playlistId: id, trackId }).then(() => toast.show('Song removed', 'success'));
+          }
+        }}
+      />
     </Screen>
   );
 }
@@ -109,43 +158,39 @@ const styles = StyleSheet.create({
     width: '100%',
     height: 220,
     borderRadius: 24,
-    backgroundColor: colors.card,
   },
   coverFallback: {
     alignItems: 'center',
     justifyContent: 'center',
   },
   name: {
-    color: colors.text,
     fontSize: 26,
     fontWeight: '800',
   },
   meta: {
-    color: colors.muted,
     fontSize: 14,
   },
   description: {
-    color: colors.muted,
     lineHeight: 20,
   },
   actions: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
     gap: 8,
   },
   trackRow: {
-    backgroundColor: colors.card,
     borderRadius: 12,
     padding: 12,
     borderWidth: 1,
-    borderColor: colors.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  flex: {
+    flex: 1,
   },
   trackTitle: {
-    color: colors.text,
     fontWeight: '700',
   },
   trackArtist: {
-    color: colors.muted,
     marginTop: 2,
   },
 });

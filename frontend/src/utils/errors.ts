@@ -15,7 +15,11 @@ export function toUserMessage(error: unknown): string {
     return error.message;
   }
   if (error instanceof Error) {
-    return error.message;
+    const firstLine = error.message.split('\n')[0]?.trim() ?? '';
+    if (!firstLine || firstLine.length > 240 || /at\s+\S+\s+\(/.test(firstLine)) {
+      return 'Something went wrong. Please try again.';
+    }
+    return firstLine;
   }
   return 'Something went wrong. Please try again.';
 }

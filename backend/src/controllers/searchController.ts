@@ -14,6 +14,7 @@ const searchQuery = z.object({
   durationMinMs: z.coerce.number().int().optional(),
   durationMaxMs: z.coerce.number().int().optional(),
   limit: z.coerce.number().int().min(1).max(50).optional(),
+  offset: z.coerce.number().int().min(0).optional(),
 });
 
 function parseSearch(req: Request) {
@@ -37,6 +38,7 @@ export async function searchAll(req: Request, res: Response): Promise<void> {
     durationMinMs: query.durationMinMs,
     durationMaxMs: query.durationMaxMs,
     limit: query.limit,
+    offset: query.offset,
   });
   res.json({ tracks });
 }
@@ -55,6 +57,7 @@ export async function searchOne(req: Request, res: Response): Promise<void> {
     durationMinMs: query.durationMinMs,
     durationMaxMs: query.durationMaxMs,
     limit: query.limit,
+    offset: query.offset,
   });
   res.json({ tracks, provider });
 }

@@ -2,6 +2,7 @@ import { MusicProviderName } from '@prisma/client';
 import { ConfigurationError, ProviderUnavailableError } from '../types/errors';
 import type { MusicProvider, ProviderId } from '../types/provider';
 import { AmazonMusicProvider } from './amazon/AmazonMusicProvider';
+import { amazonDisabledError } from './amazon/amazonErrors';
 import { SpotifyProvider } from './spotify/SpotifyProvider';
 import { YouTubeProvider } from './youtube/YouTubeProvider';
 
@@ -26,6 +27,9 @@ export function getProvider(id: ProviderId): MusicProvider {
 export function requireEnabledProvider(id: ProviderId): MusicProvider {
   const provider = getProvider(id);
   if (!provider.isEnabled()) {
+    if (id === 'amazon_music') {
+      throw amazonDisabledError();
+    }
     throw new ConfigurationError(
       `${provider.displayName} is not configured. Add official API credentials on the server and restart.`,
     );

@@ -58,7 +58,13 @@ function providerIdEqual(source: TrackResult, candidate: TrackResult): boolean {
   const sourceYt = source.youtubeVideoId ?? (source.provider === 'youtube' ? source.providerTrackId : undefined);
   const candidateYt =
     candidate.youtubeVideoId ?? (candidate.provider === 'youtube' ? candidate.providerTrackId : undefined);
-  return Boolean(sourceYt && candidateYt && sourceYt === candidateYt);
+  if (sourceYt && candidateYt && sourceYt === candidateYt) {
+    return true;
+  }
+  const sourceAm = source.amazonMusicId ?? (source.provider === 'amazon_music' ? source.providerTrackId : undefined);
+  const candidateAm =
+    candidate.amazonMusicId ?? (candidate.provider === 'amazon_music' ? candidate.providerTrackId : undefined);
+  return Boolean(sourceAm && candidateAm && sourceAm === candidateAm);
 }
 
 function clampConfidence(value: number): number {

@@ -43,7 +43,7 @@ export function PlaylistDetailScreen() {
                 if (!playlist.sourcePlaylistId) {
                   Alert.alert(
                     'Not on a music service yet',
-                    'Create this playlist on Spotify or YouTube first, then you can open it there.',
+                    'Create this playlist on Spotify, YouTube, or Amazon Music first, then you can open it there.',
                   );
                   return;
                 }
@@ -70,7 +70,7 @@ export function PlaylistDetailScreen() {
               mode="outlined"
               textColor={colors.danger}
               onPress={() => {
-                Alert.alert('Delete playlist', 'This removes the MusicMix playlist, not the copy on Spotify or YouTube.', [
+                Alert.alert('Delete playlist', 'This removes the MusicMix playlist, not the copy on Spotify, YouTube, or Amazon Music.', [
                   { text: 'Cancel', style: 'cancel' },
                   {
                     text: 'Delete',

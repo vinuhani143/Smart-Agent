@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { StyleSheet, Text, View } from 'react-native';
+import { Linking, StyleSheet, Text, View } from 'react-native';
 import { ActionCard } from '@/components/ActionCard';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorBanner } from '@/components/ErrorBanner';
@@ -65,9 +65,14 @@ export function HomeScreen() {
               void connect.mutateAsync('spotify');
             } else if (provider.id === 'youtube') {
               void connect.mutateAsync('google');
+            } else if (provider.id === 'amazon_music' && provider.enabled) {
+              void connect.mutateAsync('amazon');
             }
           }}
           onDisconnect={() => void disconnect.mutateAsync(provider.id)}
+          onLearnMore={() =>
+            void Linking.openURL(provider.learnMoreUrl ?? 'https://developer.amazon.com/docs/music/API_web_overview.html')
+          }
         />
       ))}
       {providers.isSuccess && providers.data.providers.length === 0 ? (

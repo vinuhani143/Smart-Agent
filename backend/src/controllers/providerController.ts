@@ -2,6 +2,14 @@ import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { prisma } from '../config/prisma';
 import { getProvider, fromPrismaProvider, listProviders, parseProviderId } from '../providers/ProviderRegistry';
+import {
+  AMAZON_MUSIC_DOCS_URL,
+  amazonUnavailableMessage,
+  buildAmazonFeatureStatus,
+  credentialsConfigured,
+  resolveAmazonAccessStatus,
+} from '../providers/amazon/amazonConfig';
+import { getAmazonRuntimeConfig } from '../providers/amazon/amazonRuntime';
 import { toPublicAccount, withProviderTokens } from '../services/TokenService';
 
 export async function getProviders(req: Request, res: Response): Promise<void> {
@@ -12,26 +20,72 @@ export async function getProviders(req: Request, res: Response): Promise<void> {
       })
     : [];
   const connected = new Map(accounts.map((account) => [fromPrismaProvider(account.provider), toPublicAccount(account)]));
+  const amazonConfig = getAmazonRuntimeConfig();
+  const amazonConfigured = credentialsConfigured(amazonConfig);
 
   res.json({
     providers: listProviders().map((provider) => {
       const account = connected.get(provider.id);
+      const amazonStatus =
+        provider.id === 'amazon_music'
+          ? resolveAmazonAccessStatus({
+              featureEnabled: amazonConfig.featureEnabled,
+              credentialsConfigured: amazonConfigured,
+              authenticated: Boolean(account),
+            })
+          : undefined;
+      const enabled = provider.isEnabled();
       return {
         id: provider.id,
         name: provider.displayName,
-        enabled: provider.isEnabled(),
+        enabled,
         connected: Boolean(account),
         providerUserId: account?.providerUserId,
         displayName: account?.displayName ?? null,
         imageUrl: account?.imageUrl ?? null,
         expiresAt: account?.expiresAt ?? null,
-        unavailableReason: provider.isEnabled()
+        subscriptionTier: provider.id === 'amazon_music' ? accounts.find((item) => item.provider === 'AMAZON_MUSIC')?.subscriptionTier ?? null : undefined,
+        accessStatus: amazonStatus,
+        learnMoreUrl: provider.id === 'amazon_music' ? AMAZON_MUSIC_DOCS_URL : null,
+        unavailableReason: enabled
           ? null
           : provider.id === 'amazon_music'
-            ? 'Amazon Music is a placeholder until official API access is available.'
+            ? amazonUnavailableMessage(amazonStatus ?? 'closed_beta')
             : `${provider.displayName} credentials are not configured on the server.`,
       };
     }),
+  });
+}
+
+export async function getProviderFeatureStatus(req: Request, res: Response): Promise<void> {
+  const userId = req.userId;
+  const amazonAccount = userId
+    ? await prisma.musicAccount.findUnique({
+        where: { userId_provider: { userId, provider: 'AMAZON_MUSIC' } },
+        select: { id: true },
+      })
+    : null;
+  const amazonConfig = getAmazonRuntimeConfig();
+  const amazonConfigured = credentialsConfigured(amazonConfig);
+  const amazonMusic = buildAmazonFeatureStatus({
+    featureEnabled: amazonConfig.featureEnabled,
+    credentialsConfigured: amazonConfigured,
+    authenticated: Boolean(amazonAccount),
+  });
+
+  res.json({
+    spotify: {
+      enabled: getProvider('spotify').isEnabled(),
+      configured: getProvider('spotify').isEnabled(),
+    },
+    youtube: {
+      enabled: getProvider('youtube').isEnabled(),
+      configured: getProvider('youtube').isEnabled(),
+    },
+    amazonMusic: {
+      ...amazonMusic,
+      learnMoreUrl: AMAZON_MUSIC_DOCS_URL,
+    },
   });
 }
 

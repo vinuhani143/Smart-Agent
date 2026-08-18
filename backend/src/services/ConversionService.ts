@@ -136,10 +136,12 @@ async function searchCandidates(
 
 export async function analyzeConversion(userId: string, input: AnalyzeConversionInput) {
   if (input.sourceProvider === 'amazon_music' || input.destinationProvider === 'amazon_music') {
-    throw new ProviderUnavailableError(
-      'amazon_music',
-      'Amazon Music is not available. Official API access is not configured.',
-    );
+    if (!getProvider('amazon_music').isEnabled()) {
+      throw new ProviderUnavailableError(
+        'amazon_music',
+        'Amazon Music integration is currently unavailable because Amazon Music API access has not been configured.',
+      );
+    }
   }
   if (input.sourceProvider === input.destinationProvider && !input.allowSameProvider) {
     throw new ConflictError(

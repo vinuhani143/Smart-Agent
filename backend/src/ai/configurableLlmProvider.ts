@@ -29,8 +29,8 @@ Schema:
   "explicitContent": boolean,
   "energyLevel": "low"|"medium"|"high",
   "tempo": "slow"|"medium"|"fast",
-  "sourceProvider": "spotify"|"youtube"|"both",
-  "destinationProvider": "spotify"|"youtube"
+          "sourceProvider": "spotify"|"youtube"|"amazon_music"|"both",
+          "destinationProvider": "spotify"|"youtube"|"amazon_music"
 }`;
 
 interface ChatMessage {

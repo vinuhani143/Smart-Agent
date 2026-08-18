@@ -82,19 +82,111 @@ Remote YouTube playlist HTTP surface:
 | `GET` | `/api/auth/google/callback` |
 | `POST` | `/api/auth/google/disconnect` |
 
-## Amazon Music
+## Amazon Music Web API (closed beta)
 
-There is **no enabled integration**.
+- Overview: https://developer.amazon.com/docs/music/API_web_overview.html
+- Login With Amazon: https://developer.amazon.com/docs/music/API_web_LWA.html
+- Search: https://developer.amazon.com/docs/music/API_web_search.html
+- Tracks: https://developer.amazon.com/docs/music/API_web_track.html
+- Playlists: https://developer.amazon.com/docs/music/API_web_playlist.html
+- User: https://developer.amazon.com/docs/music/API_web_user.html
+- Errors / throttling: https://developer.amazon.com/docs/music/API_web_errors.html
 
-`AmazonMusicProvider` implements `MusicProvider` but returns `PROVIDER_UNAVAILABLE` unless/until Amazon provides official API credentials and a documented playlist API. Do not add unofficial Alexa/Amazon scrape clients.
+API root: `https://api.music.amazon.dev`
 
-When Amazon access exists, set:
+**Amazon Music Web API access is subject to Amazon approval. The application does not bypass or work around Amazon's access restrictions.**
 
-- `AMAZON_MUSIC_CLIENT_ID`
-- `AMAZON_MUSIC_CLIENT_SECRET`
-- `AMAZON_MUSIC_REDIRECT_URI`
+The adapter is complete, but MusicMix does **not** claim Amazon Music is live. `AMAZON_MUSIC_ENABLED` defaults to `false`. Requests fail with:
 
-…then implement the official calls inside `backend/src/providers/amazon/AmazonMusicProvider.ts` only.
+`Amazon Music integration is currently unavailable because Amazon Music API access has not been configured.`
+
+Spotify and YouTube continue to work.
+
+### Feature flag and status
+
+`GET /api/providers/status` returns:
+
+```json
+{
+  "spotify": { "enabled": true, "configured": true },
+  "youtube": { "enabled": true, "configured": true },
+  "amazonMusic": {
+    "enabled": false,
+    "configured": false,
+    "accessStatus": "closed_beta"
+  }
+}
+```
+
+`accessStatus` is one of: `disabled`, `not_configured`, `configured`, `authenticated`, `api_access_denied`, `closed_beta`. Secrets are never included.
+
+### Login With Amazon
+
+Authorization-code grant. The LWA **client secret stays on the backend**.
+
+| Endpoint | URL |
+| --- | --- |
+| Authorize | `https://www.amazon.com/ap/oa` |
+| Token | `https://api.amazon.com/auth/o2/token` |
+| Revoke | `https://api.amazon.com/auth/o2/token/revoke` |
+| MusicMix start | `POST /api/auth/amazon/start` |
+| MusicMix callback | `GET /api/auth/amazon/callback` |
+| MusicMix disconnect | `POST /api/auth/amazon/disconnect` |
+
+MusicMix aliases `amazon` and `amazon_music`. Redirect URI env: `AMAZON_MUSIC_REDIRECT_URI`.
+
+Amazon Music API requests send:
+
+```http
+Authorization: Bearer <access_token>
+x-api-key: <AMAZON_MUSIC_SECURITY_PROFILE_ID>
+```
+
+`x-api-key` is the Security Profile ID, not the LWA Client ID.
+
+### Required scopes
+
+| Scope | Why |
+| --- | --- |
+| `music::profile` | Current user (`GET /v1/me`) |
+| `music::catalog` | Search and get tracks |
+| `music::library` | Playlist read/write (supersedes `music::library:read`) |
+
+### Playlist operations
+
+| Operation | HTTP |
+| --- | --- |
+| Current user | `GET /v1/me` |
+| Search tracks | `POST /v1/search/tracks` |
+| Get track(s) | `GET /v1/tracks/{id}` or `GET /v1/tracks?ids=` |
+| List playlists | `GET /v1/me/playlists` |
+| Get playlist | `GET /v1/playlists/{id}` |
+| Create playlist | `POST /v1/playlists` (`visibility` default **PRIVATE**) |
+| Playlist tracks | `GET /v1/playlists/{id}/tracks` |
+| Add tracks | `PUT /v1/playlists/{id}/tracks` `{ trackIds }` |
+| Remove tracks | `DELETE /v1/playlists/{id}/tracks` `{ entryIds }` |
+| Reorder tracks | `PATCH /v1/playlists/{id}/tracks` `{ entryIds, entryIdAbove, entryIdBelow }` |
+| Update playlist | `PUT /v1/playlists/{id}` |
+| Delete playlist | `DELETE /v1/playlists/{id}` |
+
+Playlist **entry IDs** (from track cursors) are required to remove or reorder. Catalog track IDs are not entry IDs. ISRC is stored only when Amazon returns it.
+
+### Rate limits
+
+Amazon Music enforces TPS limits (`THROTTLED` / HTTP 429). MusicMix retries at most **3** times with exponential backoff and honors `Retry-After`. There is no infinite retry. Invalid tokens and closed-beta API-key failures are not retried.
+
+### Environment (backend only)
+
+| Variable | Notes |
+| --- | --- |
+| `AMAZON_MUSIC_ENABLED` | Default `false` |
+| `AMAZON_MUSIC_API_BASE_URL` | Default `https://api.music.amazon.dev` |
+| `AMAZON_LWA_CLIENT_ID` | Login With Amazon client id |
+| `AMAZON_LWA_CLIENT_SECRET` | Backend only |
+| `AMAZON_MUSIC_SECURITY_PROFILE_ID` | `x-api-key` |
+| `AMAZON_MUSIC_REDIRECT_URI` | Must match LWA Allowed Return URLs |
+
+`AMAZON_MUSIC_CLIENT_ID` / `AMAZON_MUSIC_CLIENT_SECRET` are optional aliases for the LWA pair.
 
 ## Backend REST surface
 
@@ -107,6 +199,10 @@ When Amazon access exists, set:
 | `GET` | `/api/auth/google/callback` | Google redirect |
 | `POST` | `/api/auth/google/disconnect` | Revoke Google token and unlink YouTube |
 | `GET` | `/api/providers` | Enabled + connected status (no tokens) |
+| `GET` | `/api/providers/status` | Feature flags; Amazon `accessStatus` (no secrets) |
+| `POST` | `/api/auth/amazon/start` | Start Login With Amazon (disabled unless configured) |
+| `GET` | `/api/auth/amazon/callback` | LWA redirect |
+| `POST` | `/api/auth/amazon/disconnect` | Revoke LWA token and unlink |
 | `GET` | `/api/providers/:provider/playlists` | List playlists on a connected provider |
 | `GET` | `/api/search?q=` | Search connected providers |
 | `GET` | `/api/search/:provider?q=` | Search one provider |
@@ -133,9 +229,9 @@ When Amazon access exists, set:
 
 ## Cross-platform playlist conversion
 
-Supported pairs: **Spotify → YouTube** and **YouTube → Spotify**. Same-service copies (`Spotify → Spotify`, `YouTube → YouTube`) return HTTP 409 unless `allowSameProvider: true` (explicit duplicate).
+Supported pairs: Spotify, YouTube, and Amazon Music in any combination **when that provider is enabled**. Same-service copies return HTTP 409 unless `allowSameProvider: true`.
 
-Amazon Music is not a conversion source or destination.
+Amazon Music is **not** selectable while `AMAZON_MUSIC_ENABLED=false` or credentials/API access are missing.
 
 ### Matching algorithm
 
@@ -175,7 +271,7 @@ If destination playlist creation fails part-way, MusicMix stores `destinationPla
 
 ## AI playlist generation
 
-The LLM **does not produce audio**. It extracts `PlaylistIntent`, may re-rank catalog hits, and writes a title/description. Songs always come from official Spotify Web API / YouTube Data API v3 search through the provider adapters.
+The LLM **does not produce audio**. It extracts `PlaylistIntent`, may re-rank catalog hits, and writes a title/description. Songs always come from official Spotify Web API / YouTube Data API v3 / Amazon Music Web API search through the provider adapters. Amazon Music is a search/destination provider **only** when it is enabled and the user is authenticated. If Amazon is unavailable, generation continues on Spotify/YouTube with a clear message.
 
 ### Environment (backend only)
 
@@ -196,7 +292,7 @@ If any required value is missing, generate returns HTTP 503 `AI_UNAVAILABLE` wit
 4. Fill duration to about ±2 minutes of the target
 5. Return `{ generationId, intent, playlist, summary }` with `confirmationRequired: true`
 6. User edits via `PUT` (remove / reorder / add) or replace via `POST .../replace`
-7. `POST /api/ai/playlists/:id/create` `{ "destinationProvider": "spotify"|"youtube" }` creates the remote playlist
+7. `POST /api/ai/playlists/:id/create` `{ "destinationProvider": "spotify"|"youtube"|"amazon_music" }` creates the remote playlist
 
 If fewer suitable songs exist than requested, `summary.warning` is `Only X suitable songs were found.` Extra songs are never fabricated.
 

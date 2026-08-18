@@ -18,6 +18,9 @@ export function resolveOAuthProvider(param: string): ProviderId {
   if (value === 'spotify') {
     return 'spotify';
   }
+  if (value === 'amazon' || value === 'amazon_music') {
+    return 'amazon_music';
+  }
   return parseProviderId(value);
 }
 
@@ -72,6 +75,9 @@ function oauthProviderLabel(providerId: ProviderId): string {
   }
   if (providerId === 'spotify') {
     return 'Spotify';
+  }
+  if (providerId === 'amazon_music') {
+    return 'Amazon Music';
   }
   return 'this music service';
 }

@@ -4,6 +4,7 @@ import { validateBody } from '../middleware/validate';
 import {
   deleteRemotePlaylist,
   getProviders,
+  getProviderFeatureStatus,
   getRemotePlaylist,
   listRemotePlaylists,
   updateRemotePlaylist,
@@ -13,6 +14,7 @@ import {
 export const providersRouter = Router();
 
 providersRouter.get('/', requireAuth, getProviders);
+providersRouter.get('/status', requireAuth, getProviderFeatureStatus);
 providersRouter.get('/:provider/playlists', requireAuth, listRemotePlaylists);
 providersRouter.get('/:provider/playlists/:playlistId', requireAuth, getRemotePlaylist);
 providersRouter.put(

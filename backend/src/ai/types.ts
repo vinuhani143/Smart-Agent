@@ -1,7 +1,7 @@
 export type EnergyLevel = 'low' | 'medium' | 'high';
 export type TempoHint = 'slow' | 'medium' | 'fast';
-export type SearchProviderChoice = 'spotify' | 'youtube' | 'both';
-export type DestinationProviderChoice = 'spotify' | 'youtube';
+export type SearchProviderChoice = 'spotify' | 'youtube' | 'amazon_music' | 'both';
+export type DestinationProviderChoice = 'spotify' | 'youtube' | 'amazon_music';
 
 export interface PlaylistIntent {
   language?: string;

@@ -5,6 +5,8 @@ export interface ProviderUser {
   displayName: string;
   email?: string;
   imageUrl?: string;
+  /** Amazon Music subscription tier when the official API returns it. Never invented. */
+  subscriptionTier?: string;
 }
 
 export interface ProviderTokens {
@@ -44,6 +46,11 @@ export interface TrackResult {
   parsedArtist?: string;
   youtubeVideoId?: string;
   spotifyId?: string;
+  amazonMusicId?: string;
+  url?: string;
+  previewUrl?: string;
+  /** Amazon Music playlist entry id (not the catalog track id). Used for reorder/remove. */
+  playlistEntryId?: string;
 }
 
 export interface PlaylistResult {
@@ -71,6 +78,10 @@ export interface ReorderPlaylistInput {
   rangeStart: number;
   insertBefore: number;
   rangeLength?: number;
+  /** Amazon Music playlist entry IDs to move (not catalog track IDs). */
+  entryIds?: string[];
+  entryIdAbove?: string;
+  entryIdBelow?: string;
 }
 
 export interface AuthorizationRequest {
@@ -107,6 +118,9 @@ export interface MusicProvider {
     tokens: ProviderTokens,
     playlistId: string,
   ): Promise<PlaylistResult & { tracks: TrackResult[] }>;
+
+  /** Optional. Amazon Music exposes playlist tracks separately from playlist metadata. */
+  getPlaylistTracks?(tokens: ProviderTokens, playlistId: string): Promise<TrackResult[]>;
 
   getUserPlaylists(tokens: ProviderTokens): Promise<PlaylistResult[]>;
 

@@ -5,7 +5,41 @@ import { ErrorBanner } from '@/components/ErrorBanner';
 import { colors } from '@/constants/theme';
 import { API_URL } from '@/constants/config';
 import { useConnectProvider, useDisconnectProvider, useProviders } from '@/hooks/useProviders';
+import type { ProviderId } from '@/types';
 import { toUserMessage } from '@/utils/errors';
+
+function connectKind(id: ProviderId): 'spotify' | 'google' | 'amazon' | null {
+  if (id === 'spotify') {
+    return 'spotify';
+  }
+  if (id === 'youtube') {
+    return 'google';
+  }
+  if (id === 'amazon_music') {
+    return 'amazon';
+  }
+  return null;
+}
+
+function connectLabel(id: ProviderId): string {
+  if (id === 'youtube') {
+    return 'Connect YouTube';
+  }
+  if (id === 'amazon_music') {
+    return 'Connect Amazon Music';
+  }
+  return 'Connect Spotify';
+}
+
+function disconnectLabel(id: ProviderId): string {
+  if (id === 'youtube') {
+    return 'Disconnect YouTube';
+  }
+  if (id === 'amazon_music') {
+    return 'Disconnect Amazon Music';
+  }
+  return 'Disconnect Spotify';
+}
 
 export function SettingsScreen() {
   const providers = useProviders();
@@ -19,26 +53,28 @@ export function SettingsScreen() {
       {providers.isError ? <ErrorBanner message={toUserMessage(providers.error)} /> : null}
       {connect.isError ? <ErrorBanner message={toUserMessage(connect.error)} /> : null}
       {disconnect.isError ? <ErrorBanner message={toUserMessage(disconnect.error)} /> : null}
-      {(providers.data?.providers ?? [])
-        .filter((provider) => provider.id !== 'amazon_music')
-        .map((provider) => (
-          <ProviderCard
-            key={provider.id}
-            provider={provider}
-            busy={connect.isPending || disconnect.isPending}
-            connectLabel={provider.id === 'youtube' ? 'Connect YouTube' : 'Connect Spotify'}
-            disconnectLabel={provider.id === 'youtube' ? 'Disconnect YouTube' : 'Disconnect Spotify'}
-            onConnect={() => {
-              if (provider.id === 'spotify') void connect.mutateAsync('spotify');
-              if (provider.id === 'youtube') void connect.mutateAsync('google');
-            }}
-            onDisconnect={() => void disconnect.mutateAsync(provider.id)}
-          />
-        ))}
+      {(providers.data?.providers ?? []).map((provider) => (
+        <ProviderCard
+          key={provider.id}
+          provider={provider}
+          busy={connect.isPending || disconnect.isPending}
+          connectLabel={connectLabel(provider.id)}
+          disconnectLabel={disconnectLabel(provider.id)}
+          onConnect={() => {
+            const kind = connectKind(provider.id);
+            if (kind) {
+              void connect.mutateAsync(kind);
+            }
+          }}
+          onDisconnect={() => void disconnect.mutateAsync(provider.id)}
+          onLearnMore={() => void Linking.openURL(provider.learnMoreUrl ?? 'https://developer.amazon.com/docs/music/API_web_overview.html')}
+        />
+      ))}
       <Text style={styles.section}>About</Text>
       <Text style={styles.body}>
         MusicMix manages playlists through official provider APIs. It never downloads or rips audio.
-        Access tokens stay on the server. YouTube uses YouTube Data API v3.
+        Access tokens stay on the server. Amazon Music Web API access is a closed beta and stays disabled
+        until Amazon approves credentials for this app.
       </Text>
       <Text style={styles.meta}>API: {API_URL}</Text>
       <Text
@@ -46,6 +82,12 @@ export function SettingsScreen() {
         onPress={() => void Linking.openURL('https://developers.google.com/youtube/v3')}
       >
         YouTube Data API v3 docs
+      </Text>
+      <Text
+        style={styles.link}
+        onPress={() => void Linking.openURL('https://developer.amazon.com/docs/music/API_web_overview.html')}
+      >
+        Amazon Music Web API docs
       </Text>
     </Screen>
   );

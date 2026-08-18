@@ -1,6 +1,6 @@
 import { Prisma, type PlaylistGeneration } from '@prisma/client';
 import { prisma } from '../config/prisma';
-import { toPrismaProvider } from '../providers/ProviderRegistry';
+import { getProvider, toPrismaProvider } from '../providers/ProviderRegistry';
 import { DuplicateDetector } from '../services/DuplicateDetector';
 import { createLocalPlaylist } from '../services/PlaylistService';
 import { searchConnectedProviders, searchProvider } from '../services/SearchService';
@@ -26,7 +26,7 @@ import type { PlaylistIntent, ScoredTrack, SearchProviderChoice } from './types'
 export interface GeneratePlaylistInput {
   prompt: string;
   provider?: SearchProviderChoice;
-  destinationProvider?: 'spotify' | 'youtube';
+  destinationProvider?: 'spotify' | 'youtube' | 'amazon_music';
   language?: string;
   mood?: string;
   genre?: string;
@@ -62,7 +62,7 @@ export interface PlaylistGenerationView {
     orderingNote: string | null;
     searchQueries: string[];
     sourceProvider: SearchProviderChoice;
-    destinationProvider: 'spotify' | 'youtube' | null;
+    destinationProvider: 'spotify' | 'youtube' | 'amazon_music' | null;
   };
   status: string;
   confirmationRequired: true;
@@ -180,7 +180,10 @@ function toView(row: PlaylistGeneration): PlaylistGenerationView {
       orderingNote: row.orderingStrategy,
       searchQueries: parseQueries(row.searchQueries),
       sourceProvider:
-        row.provider === 'spotify' || row.provider === 'youtube' || row.provider === 'both'
+        row.provider === 'spotify' ||
+        row.provider === 'youtube' ||
+        row.provider === 'amazon_music' ||
+        row.provider === 'both'
           ? row.provider
           : 'both',
       destinationProvider:
@@ -188,7 +191,9 @@ function toView(row: PlaylistGeneration): PlaylistGenerationView {
           ? 'spotify'
           : row.destinationProvider === 'YOUTUBE'
             ? 'youtube'
-            : null,
+            : row.destinationProvider === 'AMAZON_MUSIC'
+              ? 'amazon_music'
+              : null,
     },
     status: row.status,
     confirmationRequired: true,
@@ -212,7 +217,10 @@ function restrictTo(source: SearchProviderChoice): ProviderId[] | undefined {
   if (source === 'youtube') {
     return ['youtube'];
   }
-  return ['spotify', 'youtube'];
+  if (source === 'amazon_music') {
+    return ['amazon_music'];
+  }
+  return ['spotify', 'youtube', 'amazon_music'];
 }
 
 function hintsFromInput(input: GeneratePlaylistInput): Partial<PlaylistIntent> {
@@ -271,6 +279,14 @@ export class PlaylistGeneratorService {
     const intent = applyIntentHints(parsed, hintsFromInput(input));
     validateIntent(intent, prompt);
 
+    const amazonAdapter = getProvider('amazon_music');
+    let amazonUnavailableNote: string | null = null;
+    if (intent.destinationProvider === 'amazon_music' && !amazonAdapter.isEnabled()) {
+      amazonUnavailableNote =
+        'Amazon Music is currently unavailable. Create on Spotify or YouTube instead.';
+      intent.destinationProvider = undefined;
+    }
+
     const source = sourceFrom(intent, input.provider);
     const queries = buildSearchQueries({ ...intent, sourceProvider: source }, prompt);
 
@@ -323,11 +339,13 @@ export class PlaylistGeneratorService {
           };
 
     const warning =
+      amazonUnavailableNote ??
       durationShortageWarning(
         ordered.tracks.length,
         Math.round(selected.totalDurationMs / 60000),
         intent.durationMinutes,
-      ) ?? (searchErrors.length > 0 && ordered.tracks.length > 0 ? 'Some searches could not be completed.' : null);
+      ) ??
+      (searchErrors.length > 0 && ordered.tracks.length > 0 ? 'Some searches could not be completed.' : null);
 
     const status = ordered.tracks.length === 0 ? 'FAILED' : 'GENERATED';
     assertGenerateDoesNotCreate(status);
@@ -491,7 +509,7 @@ export class PlaylistGeneratorService {
   static async createOnProvider(
     userId: string,
     id: string,
-    destinationProvider?: 'spotify' | 'youtube',
+    destinationProvider?: 'spotify' | 'youtube' | 'amazon_music',
   ): Promise<{ playlistId: string; generationId: string; confirmationRequired: false }> {
     const row = await prisma.playlistGeneration.findFirst({ where: { id, userId } });
     if (!row) {
@@ -510,13 +528,23 @@ export class PlaylistGeneratorService {
         ? 'spotify'
         : row.destinationProvider === 'YOUTUBE'
           ? 'youtube'
-          : undefined);
+          : row.destinationProvider === 'AMAZON_MUSIC'
+            ? 'amazon_music'
+            : undefined);
 
     if (!destination) {
       throw new AppError(
         ErrorCode.VALIDATION_ERROR,
-        'Choose Spotify or YouTube as the destination, then confirm Create Playlist.',
+        'Choose Spotify, YouTube, or Amazon Music as the destination, then confirm Create Playlist.',
         400,
+      );
+    }
+
+    if (destination === 'amazon_music' && !getProvider('amazon_music').isEnabled()) {
+      throw new AppError(
+        ErrorCode.PROVIDER_UNAVAILABLE,
+        'Amazon Music is currently unavailable. Create on Spotify or YouTube instead.',
+        503,
       );
     }
 

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { AppError, ConflictError, NoSearchResultsError, TokenInvalidError, YouTubeQuotaExceededError } from '../types/errors';
+import { AppError, ConflictError, NoSearchResultsError, ProviderUnavailableError, TokenInvalidError, YouTubeQuotaExceededError } from '../types/errors';
 import {
   assertReadyToCreate,
   classifySearchError,
@@ -39,6 +39,15 @@ describe('provider failure handling', () => {
     assert.equal(classifySearchError(new NoSearchResultsError('telugu')), 'empty');
     assert.equal(classifySearchError(new TokenInvalidError()), 'fatal');
     assert.equal(classifySearchError(new YouTubeQuotaExceededError()), 'soft');
+    assert.equal(
+      classifySearchError(
+        new ProviderUnavailableError(
+          'amazon_music',
+          'Amazon Music integration is currently unavailable because Amazon Music API access has not been configured.',
+        ),
+      ),
+      'soft',
+    );
   });
 });
 

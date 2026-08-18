@@ -2,6 +2,7 @@ import { prisma } from '../config/prisma';
 import { NoSearchResultsError, TokenInvalidError } from '../types/errors';
 import type { ProviderId, SearchTracksParams, TrackResult } from '../types/provider';
 import { fromPrismaProvider, getProvider } from '../providers/ProviderRegistry';
+import { amazonDisabledError } from '../providers/amazon/amazonErrors';
 import { isNonRetryableProviderError } from '../providers/youtube/youtubeErrors';
 import { listConnectedProviders, withProviderTokens } from './TokenService';
 
@@ -12,6 +13,9 @@ export async function searchProvider(
 ): Promise<TrackResult[]> {
   const adapter = getProvider(provider);
   if (!adapter.isEnabled()) {
+    if (provider === 'amazon_music') {
+      throw amazonDisabledError();
+    }
     throw new TokenInvalidError(`${adapter.displayName} is not configured on this server.`);
   }
   const results = await withProviderTokens(userId, provider, (tokens) => adapter.searchTracks(tokens, params));
@@ -33,6 +37,9 @@ export async function searchConnectedProviders(
     .filter((id) => getProvider(id).isEnabled());
 
   if (providerIds.length === 0) {
+    if (restrictTo?.includes('amazon_music') && !getProvider('amazon_music').isEnabled()) {
+      throw amazonDisabledError();
+    }
     throw new TokenInvalidError('Connect a music service in Settings before searching.');
   }
 

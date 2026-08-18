@@ -4,6 +4,7 @@ import {
   ErrorCode,
   NetworkError,
   NoSearchResultsError,
+  ProviderUnavailableError,
   RateLimitedError,
   TokenExpiredError,
   TokenInvalidError,
@@ -22,7 +23,8 @@ export function classifySearchError(error: unknown): SearchErrorClass {
   if (
     error instanceof YouTubeQuotaExceededError ||
     error instanceof RateLimitedError ||
-    error instanceof NetworkError
+    error instanceof NetworkError ||
+    error instanceof ProviderUnavailableError
   ) {
     return 'soft';
   }

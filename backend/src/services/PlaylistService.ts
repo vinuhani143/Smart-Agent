@@ -63,14 +63,16 @@ export async function createLocalPlaylist(userId: string, input: CreateLocalPlay
   let coverImageUrl = input.coverImageUrl;
 
   if (input.targetProvider) {
-    if (input.targetProvider === 'amazon_music') {
-      throw new ProviderUnavailableError(
-        'amazon_music',
-        'Amazon Music is not available. Official API access is not configured.',
-      );
-    }
     const targetProvider = input.targetProvider;
     const adapter = getProvider(targetProvider);
+    if (!adapter.isEnabled()) {
+      throw new ProviderUnavailableError(
+        targetProvider,
+        targetProvider === 'amazon_music'
+          ? 'Amazon Music integration is currently unavailable because Amazon Music API access has not been configured.'
+          : `${adapter.displayName} is not configured.`,
+      );
+    }
     const remote = await withProviderTokens(userId, targetProvider, async (tokens) => {
       const created = await adapter.createPlaylist(tokens, {
         name: input.name,
@@ -162,6 +164,9 @@ function remoteTrackIdForProvider(provider: ProviderId, result: TrackResult): st
   }
   if (provider === 'spotify') {
     return result.spotifyId ?? (result.provider === 'spotify' ? result.providerTrackId : undefined);
+  }
+  if (provider === 'amazon_music') {
+    return result.amazonMusicId ?? (result.provider === 'amazon_music' ? result.providerTrackId : undefined);
   }
   return undefined;
 }
@@ -277,8 +282,16 @@ export async function createPlaylistOnProvider(
   confirmedTrackIds?: string[],
 ) {
   const playlist = await getPlaylist(userId, playlistId);
-  await requireStoredAccount(userId, provider);
   const adapter = getProvider(provider);
+  if (!adapter.isEnabled()) {
+    throw new ProviderUnavailableError(
+      provider,
+      provider === 'amazon_music'
+        ? 'Amazon Music integration is currently unavailable because Amazon Music API access has not been configured.'
+        : `${adapter.displayName} is not configured.`,
+    );
+  }
+  await requireStoredAccount(userId, provider);
 
   const created = await withProviderTokens(userId, provider, async (tokens) => {
     const remote = await adapter.createPlaylist(tokens, {

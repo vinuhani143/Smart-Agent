@@ -8,6 +8,7 @@ interface ProviderCardProps {
   provider: ProviderStatus;
   onConnect?: () => void;
   onDisconnect?: () => void;
+  onLearnMore?: () => void;
   busy?: boolean;
   connectLabel?: string;
   disconnectLabel?: string;
@@ -17,13 +18,16 @@ export function ProviderCard({
   provider,
   onConnect,
   onDisconnect,
+  onLearnMore,
   busy,
   connectLabel,
   disconnectLabel,
 }: ProviderCardProps) {
   const meta = providerMeta[provider.id];
   const statusLabel = !provider.enabled
-    ? 'Not available'
+    ? provider.accessStatus === 'closed_beta' || provider.id === 'amazon_music'
+      ? 'Unavailable'
+      : 'Not available'
     : provider.connected
       ? 'Connected'
       : 'Not Connected';
@@ -42,7 +46,12 @@ export function ProviderCard({
         {provider.connected && provider.displayName ? (
           <Text style={styles.reason}>{provider.displayName}</Text>
         ) : null}
-        {provider.unavailableReason && !provider.enabled ? (
+        {provider.connected && provider.subscriptionTier ? (
+          <Text style={styles.reason}>Plan: {provider.subscriptionTier}</Text>
+        ) : null}
+        {provider.id === 'amazon_music' && !provider.enabled ? (
+          <Text style={styles.reason}>Amazon Music integration is currently unavailable.</Text>
+        ) : provider.unavailableReason && !provider.enabled ? (
           <Text style={styles.reason}>{provider.unavailableReason}</Text>
         ) : null}
       </View>
@@ -53,6 +62,10 @@ export function ProviderCard({
           style={[styles.button, provider.connected && styles.buttonGhost]}
         >
           <Text style={styles.buttonText}>{actionLabel}</Text>
+        </Pressable>
+      ) : provider.id === 'amazon_music' && onLearnMore ? (
+        <Pressable onPress={onLearnMore} style={[styles.button, styles.buttonGhost]}>
+          <Text style={styles.buttonText}>Learn about Amazon Music access</Text>
         </Pressable>
       ) : null}
     </View>

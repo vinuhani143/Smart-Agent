@@ -7,7 +7,9 @@ import { ErrorBanner } from '@/components/ErrorBanner';
 import { Screen } from '@/components/Screen';
 import { TrackCard } from '@/components/TrackCard';
 import { colors } from '@/constants/theme';
+import { isAmazonMusicLive, isAmazonMusicReady } from '@/constants/providers';
 import { apiFetch } from '@/services/api';
+import { useProviders } from '@/hooks/useProviders';
 import type {
   GeneratePlaylistPayload,
   GeneratedTrack,
@@ -61,8 +63,8 @@ export function AiPlaylistScreen() {
   const [prompt, setPrompt] = useState(
     'Create a 2 hour Telugu romantic melody playlist from 1995 to 2010 without duplicate songs.',
   );
-  const [provider, setProvider] = useState<'spotify' | 'youtube' | 'both'>('both');
-  const [destination, setDestination] = useState<'spotify' | 'youtube' | null>(null);
+  const [provider, setProvider] = useState<'spotify' | 'youtube' | 'amazon_music' | 'both'>('both');
+  const [destination, setDestination] = useState<'spotify' | 'youtube' | 'amazon_music' | null>(null);
   const [language, setLanguage] = useState<string | undefined>();
   const [genre, setGenre] = useState<string | undefined>();
   const [mood, setMood] = useState<string | undefined>();
@@ -79,6 +81,9 @@ export function AiPlaylistScreen() {
   const [addQuery, setAddQuery] = useState('');
   const [addResults, setAddResults] = useState<TrackResult[]>([]);
   const [adding, setAdding] = useState(false);
+  const providers = useProviders();
+  const amazonLive = isAmazonMusicLive(providers.data?.providers);
+  const amazonReady = isAmazonMusicReady(providers.data?.providers);
 
   useEffect(() => {
     if (!loading) {
@@ -128,7 +133,12 @@ export function AiPlaylistScreen() {
       });
       setView(result);
       if (!destination && result.summary.sourceProvider !== 'both') {
-        setDestination(result.summary.sourceProvider === 'youtube' ? 'youtube' : 'spotify');
+        const source = result.summary.sourceProvider;
+        if (source === 'amazon_music') {
+          setDestination(amazonReady ? 'amazon_music' : null);
+        } else {
+          setDestination(source === 'youtube' ? 'youtube' : 'spotify');
+        }
       }
     } catch (err) {
       setError(toUserMessage(err));
@@ -233,7 +243,15 @@ export function AiPlaylistScreen() {
       return;
     }
     if (!destination) {
-      setError('Choose Spotify or YouTube as the destination, then confirm Create Playlist.');
+      setError(
+        amazonLive
+          ? 'Choose Spotify, YouTube, or Amazon Music as the destination, then confirm Create Playlist.'
+          : 'Choose Spotify or YouTube as the destination, then confirm Create Playlist.',
+      );
+      return;
+    }
+    if (destination === 'amazon_music' && !amazonReady) {
+      setError('Amazon Music is currently unavailable. Create on Spotify or YouTube instead.');
       return;
     }
     setLoading(true);
@@ -332,13 +350,36 @@ export function AiPlaylistScreen() {
       <View style={styles.wrapRow}>
         <Chip label="Spotify" active={provider === 'spotify'} onPress={() => setProvider('spotify')} />
         <Chip label="YouTube" active={provider === 'youtube'} onPress={() => setProvider('youtube')} />
+        {amazonReady ? (
+          <Chip
+            label="Amazon Music"
+            active={provider === 'amazon_music'}
+            onPress={() => setProvider('amazon_music')}
+          />
+        ) : (
+          <Chip label="Amazon Music — Coming Soon" active={false} onPress={() => undefined} />
+        )}
         <Chip label="Both" active={provider === 'both'} onPress={() => setProvider('both')} />
       </View>
       <Text style={styles.section}>Create on</Text>
       <View style={styles.wrapRow}>
         <Chip label="Spotify" active={destination === 'spotify'} onPress={() => setDestination('spotify')} />
         <Chip label="YouTube" active={destination === 'youtube'} onPress={() => setDestination('youtube')} />
+        {amazonReady ? (
+          <Chip
+            label="Amazon Music"
+            active={destination === 'amazon_music'}
+            onPress={() => setDestination('amazon_music')}
+          />
+        ) : (
+          <Chip label="Amazon Music — Coming Soon" active={false} onPress={() => undefined} />
+        )}
       </View>
+      {!amazonReady ? (
+        <Text style={styles.warning}>
+          Amazon Music is currently unavailable. Create on Spotify or YouTube instead.
+        </Text>
+      ) : null}
       {provider === 'both' ? (
         <Text style={styles.meta}>
           Searching both services builds a provider-independent preview. Choose a destination before creating.
@@ -370,7 +411,7 @@ export function AiPlaylistScreen() {
       ) : (
         <EmptyState
           title="Preview first"
-          body="MusicMix searches Spotify and YouTube for real songs. Nothing is created until you review and confirm."
+          body="MusicMix searches connected catalogs for real songs. Amazon Music is a destination only when official API access is enabled. Nothing is created until you review and confirm."
         />
       )}
 
@@ -415,7 +456,7 @@ export function AiPlaylistScreen() {
             Save Playlist
           </Button>
           <Text style={styles.hint}>
-            Create Playlist runs only after this confirmation. Generation never creates a playlist on Spotify or YouTube.
+            Create Playlist runs only after this confirmation. Generation never creates a playlist on Spotify, YouTube, or Amazon Music.
           </Text>
         </>
       ) : null}

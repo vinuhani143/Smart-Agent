@@ -36,5 +36,6 @@ Amazon Music is a disabled placeholder adapter until official API access exists.
 - **Google**: OAuth client + YouTube Data API v3 from [Google Cloud Console](https://console.cloud.google.com/)
 - **PostgreSQL** connection string
 - `JWT_SECRET` and `TOKEN_ENCRYPTION_KEY` (generate with `openssl rand -hex 32`)
+- **AI playlist generation** (backend only): `AI_PROVIDER`, `AI_API_KEY`, `AI_MODEL` (optional `AI_BASE_URL` for OpenAI-compatible endpoints)
 
-Never put client secrets in the mobile app.
+Never put client secrets or AI API keys in the mobile app.

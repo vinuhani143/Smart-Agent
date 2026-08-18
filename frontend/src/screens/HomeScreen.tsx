@@ -34,7 +34,7 @@ export function HomeScreen() {
             emoji="🤖"
             title="AI Playlist"
             subtitle="Describe what you want"
-            onPress={() => router.push('/playlist/ai')}
+            onPress={() => router.push('/ai-playlist')}
           />
         </View>
         <View style={styles.gridRow}>

@@ -25,6 +25,7 @@ enum GenerationStatus {
   CONFIRMED
   CREATED
   FAILED
+  EDITED
 }
 
 enum ConversionStatus {
@@ -54,6 +55,7 @@ model User {
   musicAccounts       MusicAccount[]
   playlists           Playlist[]
   generationRequests  PlaylistGenerationRequest[]
+  playlistGenerations PlaylistGeneration[]
   conversions         PlaylistConversion[]
   oauthStates         OAuthState[]
 }
@@ -158,6 +160,34 @@ model PlaylistGenerationRequest {
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
   user             User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+/// AI playlist generation job. The destination playlist is never created
+/// on a provider until the user confirms the preview.
+model PlaylistGeneration {
+  id                   String             @id @default(cuid())
+  userId               String
+  requestText          String
+  parsedIntent         Json
+  generatedTitle       String?
+  generatedDescription String?
+  provider             String?
+  destinationProvider  MusicProviderName?
+  trackCount           Int                @default(0)
+  durationMinutes      Int?
+  totalDurationMs      Int                @default(0)
+  status               GenerationStatus   @default(GENERATED)
+  candidateTracks      Json
+  searchQueries        Json?
+  orderingStrategy     String?
+  warning              String?
+  resultPlaylistId     String?
+  errorMessage         String?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  user                 User               @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt])
 }

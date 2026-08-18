@@ -35,6 +35,10 @@ const envSchema = z.object({
   AMAZON_MUSIC_CLIENT_ID: z.string().optional().default(''),
   AMAZON_MUSIC_CLIENT_SECRET: z.string().optional().default(''),
   AMAZON_MUSIC_REDIRECT_URI: z.string().optional().default(''),
+  AI_PROVIDER: z.string().optional().default(''),
+  AI_API_KEY: z.string().optional().default(''),
+  AI_MODEL: z.string().optional().default(''),
+  AI_BASE_URL: z.string().optional().default(''),
 });
 
 export type Env = z.infer<typeof envSchema>;

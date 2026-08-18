@@ -1,14 +1,17 @@
 export const ErrorCode = {
   OAUTH_FAILED: 'OAUTH_FAILED',
+  OAUTH_CANCELLED: 'OAUTH_CANCELLED',
   TOKEN_EXPIRED: 'TOKEN_EXPIRED',
   TOKEN_INVALID: 'TOKEN_INVALID',
   RATE_LIMITED: 'RATE_LIMITED',
+  QUOTA_EXCEEDED: 'QUOTA_EXCEEDED',
   NETWORK_ERROR: 'NETWORK_ERROR',
   NO_SEARCH_RESULTS: 'NO_SEARCH_RESULTS',
   DUPLICATE_TRACK: 'DUPLICATE_TRACK',
   TRACK_UNAVAILABLE: 'TRACK_UNAVAILABLE',
   INSUFFICIENT_PERMISSIONS: 'INSUFFICIENT_PERMISSIONS',
   PROVIDER_UNAVAILABLE: 'PROVIDER_UNAVAILABLE',
+  NOT_SUPPORTED: 'NOT_SUPPORTED',
   VALIDATION_ERROR: 'VALIDATION_ERROR',
   UNAUTHORIZED: 'UNAUTHORIZED',
   NOT_FOUND: 'NOT_FOUND',
@@ -60,6 +63,13 @@ export class OAuthFailedError extends AppError {
   }
 }
 
+export class OAuthCancelledError extends AppError {
+  constructor(message = 'YouTube connection was cancelled.') {
+    super(ErrorCode.OAUTH_CANCELLED, message, 400);
+    this.name = 'OAuthCancelledError';
+  }
+}
+
 export class TokenExpiredError extends AppError {
   constructor(message = 'Your music-service session expired. Please reconnect the account.') {
     super(ErrorCode.TOKEN_EXPIRED, message, 401);
@@ -83,6 +93,25 @@ export class RateLimitedError extends AppError {
       retryAfterSeconds !== undefined ? { retryAfterSeconds } : undefined,
     );
     this.name = 'RateLimitedError';
+  }
+}
+
+export class YouTubeQuotaExceededError extends AppError {
+  constructor(
+    message = 'YouTube search quota has been exceeded. Please try again later.',
+  ) {
+    super(ErrorCode.QUOTA_EXCEEDED, message, 429, {
+      provider: 'youtube',
+      retry: false,
+    });
+    this.name = 'YouTubeQuotaExceededError';
+  }
+}
+
+export class OperationNotSupportedError extends AppError {
+  constructor(message: string) {
+    super(ErrorCode.NOT_SUPPORTED, message, 501);
+    this.name = 'OperationNotSupportedError';
   }
 }
 

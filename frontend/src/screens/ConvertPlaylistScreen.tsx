@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { StyleSheet, Text } from 'react-native';
 import { Button } from 'react-native-paper';
 import { EmptyState } from '@/components/EmptyState';
@@ -49,7 +49,9 @@ export function ConvertPlaylistScreen() {
       ))}
 
       <Text style={styles.label}>Destination</Text>
-      {(providers.data?.providers ?? []).map((provider) => (
+      {(providers.data?.providers ?? [])
+        .filter((provider) => provider.id !== 'amazon_music')
+        .map((provider) => (
         <Button
           key={provider.id}
           disabled={!provider.enabled || !provider.connected}
@@ -98,11 +100,24 @@ export function ConvertPlaylistScreen() {
       ) : null}
 
       {matches.map((match) => (
-        <TrackCard
-          key={`${match.source.title}-${match.source.artist}`}
-          track={match.best?.track ?? match.source}
-          confidence={match.best?.confidence}
-        />
+        <Fragment key={`${match.source.provider}:${match.source.providerTrackId}`}>
+          <TrackCard
+            track={match.best && !match.best.needsReview ? match.best.track : match.source}
+            confidence={match.best?.confidence}
+          />
+          {match.best?.needsReview || !match.best ? (
+            <>
+              <Text style={styles.label}>Low confidence — pick an alternative</Text>
+              {(match.best ? [match.best, ...match.alternatives] : match.alternatives).map((alt) => (
+                <TrackCard
+                  key={`${alt.track.provider}:${alt.track.providerTrackId}`}
+                  track={alt.track}
+                  confidence={alt.confidence}
+                />
+              ))}
+            </>
+          ) : null}
+        </Fragment>
       ))}
     </Screen>
   );

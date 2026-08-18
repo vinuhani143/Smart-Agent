@@ -37,14 +37,50 @@ Enable **YouTube Data API v3** on the Google Cloud project.
 
 | Scope | Why |
 | --- | --- |
-| `openid` `email` `profile` | Identify the Google user |
-| `https://www.googleapis.com/auth/youtube` | List, create, and modify playlists |
+| `https://www.googleapis.com/auth/youtube` | Identify the YouTube channel, search as the user, list/create/update/delete playlists, add/remove/reorder playlist items |
 
-Redirect URI env: `GOOGLE_REDIRECT_URI` (backend only). Client secret stays on the server.
+Redirect URI env: `GOOGLE_REDIRECT_URI` (backend only). Client secret stays on the server. MusicMix does **not** request Gmail, Drive, or extra profile scopes.
 
-Optional `YOUTUBE_API_KEY` can be used for unauthenticated `search.list` / `videos.list`. Playlist writes still require a connected OAuth account.
+Optional `YOUTUBE_API_KEY` can be used for unauthenticated `search.list` / `videos.list`. Playlist mutations require a connected OAuth account.
 
-YouTube does not expose ISRC. Matching to YouTube therefore relies on title/artist (and album when present) with a confidence score.
+YouTube does not expose ISRC. Search titles are parsed (`Artist - Song`, `Song \| Artist`, official-video noise stripped). Low-confidence parses keep the original title and mark `metadataConfidence`. Matching to Spotify then uses ISRC (if present) → exact/normalized title+artist → album+artist → fuzzy score 0–100. Scores below 80 are not auto-selected.
+
+### YouTube Data API operations used
+
+| Operation | HTTP | Purpose |
+| --- | --- | --- |
+| `channels.list` (`mine=true`) | GET | Authenticated YouTube channel id + display name |
+| `search.list` (`type=video`, `videoCategoryId=10`) | GET | Music-oriented video search |
+| `videos.list` (`snippet,contentDetails,status`) | GET | Duration, thumbnails, availability |
+| `playlists.list` (`mine=true` or `id=`) | GET | User playlists / playlist details |
+| `playlists.insert` | POST | Create playlist |
+| `playlists.update` | PUT | Update name/description |
+| `playlists.delete` | DELETE | Delete playlist |
+| `playlistItems.list` | GET | Playlist videos (paginated) |
+| `playlistItems.insert` | POST | Add a video |
+| `playlistItems.delete` | DELETE | Remove a video |
+| `playlistItems.update` | PUT | Move **one** video (`snippet.position`) |
+| Google `token` / `revoke` | POST | Authorization-code exchange, refresh, revoke |
+
+Quota units (Google defaults, subject to change): `search.list` is expensive (typically 100 units), `videos.list` / `playlists.*` / `playlistItems.*` are cheaper (typically 1–50). The default project quota is 10,000 units/day.
+
+If YouTube returns `quotaExceeded` / `dailyLimitExceeded`, MusicMix **does not retry**. The API returns HTTP 429 with:
+
+`YouTube search quota has been exceeded. Please try again later.`
+
+Multi-item playlist range moves are **not supported** on YouTube (each `playlistItems.update` costs quota and a partial update could leave the playlist inconsistent). Single-item reorder is implemented via the official `playlistItems.update` position field.
+
+Remote YouTube playlist HTTP surface:
+
+| Method | Path |
+| --- | --- |
+| `GET` | `/api/providers/youtube/playlists` |
+| `GET` | `/api/providers/youtube/playlists/:playlistId` |
+| `PUT` | `/api/providers/youtube/playlists/:playlistId` |
+| `DELETE` | `/api/providers/youtube/playlists/:playlistId` |
+| `POST` | `/api/auth/google/start` |
+| `GET` | `/api/auth/google/callback` |
+| `POST` | `/api/auth/google/disconnect` |
 
 ## Amazon Music
 
@@ -69,7 +105,9 @@ When Amazon access exists, set:
 | `GET` | `/api/auth/spotify/callback` | Spotify redirect |
 | `POST` | `/api/auth/google/start` | Start Google OAuth |
 | `GET` | `/api/auth/google/callback` | Google redirect |
+| `POST` | `/api/auth/google/disconnect` | Revoke Google token and unlink YouTube |
 | `GET` | `/api/providers` | Enabled + connected status (no tokens) |
+| `GET` | `/api/providers/:provider/playlists` | List playlists on a connected provider |
 | `GET` | `/api/search?q=` | Search connected providers |
 | `GET` | `/api/search/:provider?q=` | Search one provider |
 | `GET` | `/api/playlists` | List MusicMix playlists |
@@ -86,6 +124,6 @@ When Amazon access exists, set:
 
 ## Errors the client can show
 
-Human-readable messages are mapped for: OAuth failure, expired/invalid token, rate limit, network error, no search results, duplicate track, track unavailable on destination, insufficient permissions, provider unavailable.
+Human-readable messages are mapped for: OAuth failure, OAuth cancellation, expired/invalid token, refresh failure, YouTube quota exceeded, 403 permission errors, 404/private/deleted videos, rate limit, network error, no search results, duplicate track, track unavailable on destination, insufficient permissions, provider unavailable, reorder not supported.
 
 Responses never include client secrets, refresh tokens, access tokens, or `DATABASE_URL`.

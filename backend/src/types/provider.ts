@@ -38,6 +38,12 @@ export interface TrackResult {
   isrc?: string;
   thumbnailUrl?: string;
   explicit?: boolean;
+  originalTitle?: string;
+  metadataConfidence?: number;
+  parsedTitle?: string;
+  parsedArtist?: string;
+  youtubeVideoId?: string;
+  spotifyId?: string;
 }
 
 export interface PlaylistResult {
@@ -54,6 +60,11 @@ export interface CreatePlaylistInput {
   name: string;
   description?: string;
   isPublic?: boolean;
+}
+
+export interface UpdatePlaylistInput {
+  name?: string;
+  description?: string;
 }
 
 export interface ReorderPlaylistInput {
@@ -100,6 +111,14 @@ export interface MusicProvider {
   getUserPlaylists(tokens: ProviderTokens): Promise<PlaylistResult[]>;
 
   createPlaylist(tokens: ProviderTokens, input: CreatePlaylistInput): Promise<PlaylistResult>;
+
+  updatePlaylist(
+    tokens: ProviderTokens,
+    playlistId: string,
+    input: UpdatePlaylistInput,
+  ): Promise<PlaylistResult>;
+
+  deletePlaylist(tokens: ProviderTokens, playlistId: string): Promise<void>;
 
   addTracksToPlaylist(tokens: ProviderTokens, playlistId: string, trackIds: string[]): Promise<void>;
 

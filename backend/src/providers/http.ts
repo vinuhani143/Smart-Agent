@@ -5,6 +5,7 @@ import {
   TokenExpiredError,
   TokenInvalidError,
 } from '../types/errors';
+import { mapGoogleApiError } from './youtube/youtubeErrors';
 
 export interface HttpRequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
@@ -46,6 +47,19 @@ export async function providerJson<T>(url: string, options: HttpRequestOptions =
 export async function throwIfProviderError(response: Response): Promise<void> {
   if (response.ok) {
     return;
+  }
+
+  const raw = await response.text();
+  let body: unknown;
+  try {
+    body = raw ? JSON.parse(raw) : undefined;
+  } catch {
+    body = undefined;
+  }
+
+  const mapped = mapGoogleApiError(response.status, body);
+  if (mapped) {
+    throw mapped;
   }
 
   const retryAfter = response.headers.get('retry-after');

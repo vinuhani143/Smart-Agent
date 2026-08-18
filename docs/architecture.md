@@ -57,12 +57,12 @@ PostgreSQL via Prisma (`prisma/schema.prisma`):
 
 `MusicProvider` (`backend/src/types/provider.ts`) defines:
 
-`authenticate`, `logout`, `searchTracks`, `getTrack`, `getPlaylist`, `getUserPlaylists`, `createPlaylist`, `addTracksToPlaylist`, `removeTracksFromPlaylist`, `reorderPlaylist`, `getCurrentUser`
+`authenticate`, `logout`, `searchTracks`, `getTrack`, `getPlaylist`, `getUserPlaylists`, `createPlaylist`, `updatePlaylist`, `deletePlaylist`, `addTracksToPlaylist`, `removeTracksFromPlaylist`, `reorderPlaylist`, `getCurrentUser`
 
 | Adapter | Status |
 | --- | --- |
 | `SpotifyProvider` | Official Spotify Web API + Authorization Code with PKCE (verifier stored on the server) |
-| `YouTubeProvider` | Official Google OAuth + YouTube Data API v3 |
+| `YouTubeProvider` | Official Google OAuth + YouTube Data API v3 (`youtube` scope only). Channel id is `providerUserId`. |
 | `AmazonMusicProvider` | Placeholder. Throws `PROVIDER_UNAVAILABLE` until official API access is configured |
 
 `ProviderRegistry` is the only place callers look up an adapter.
@@ -91,6 +91,12 @@ If credentials are missing, the adapter reports `enabled: false` instead of faki
 Normalization lowercases, strips punctuation, collapses spaces, and removes `feat.` / `featuring`, `official audio`, `lyrics`, `remastered`, `live`, `remix`.
 
 Confidence is 0–100. Below 80, `needsReview` is true and alternatives are returned. MusicMix does not auto-select a weak match.
+
+YouTube search titles are parsed before matching (`Artist - Song`, `Song | Artist`, official-video noise). The Convert screen shows alternatives when confidence is low.
+
+## YouTube playlist reorder
+
+`YouTubeProvider.reorderPlaylist` implements a **single-item** move via official `playlistItems.update` (`snippet.position`). Multi-item range moves (`rangeLength !== 1`) return `NOT_SUPPORTED` (HTTP 501). MusicMix does not fake a bulk reorder: each YouTube update costs quota, and a partial update could leave the playlist inconsistent.
 
 ## Playlist generation
 

@@ -1,7 +1,7 @@
 import { prisma } from '../config/prisma';
-import { DuplicateTrackError, NotFoundError } from '../types/errors';
+import { DuplicateTrackError, NotFoundError, ProviderUnavailableError } from '../types/errors';
 import type { ProviderId, TrackResult } from '../types/provider';
-import { getProvider, toPrismaProvider } from '../providers/ProviderRegistry';
+import { fromPrismaProvider, getProvider, toPrismaProvider } from '../providers/ProviderRegistry';
 import { DuplicateDetector } from './DuplicateDetector';
 import { upsertTrack } from './SearchService';
 import { requireStoredAccount, withProviderTokens } from './TokenService';
@@ -13,6 +13,7 @@ export interface CreateLocalPlaylistInput {
   coverImageUrl?: string;
   sourceProvider?: ProviderId;
   sourcePlaylistId?: string;
+  targetProvider?: ProviderId;
   language?: string;
   genre?: string;
   mood?: string;
@@ -57,14 +58,46 @@ export async function createLocalPlaylist(userId: string, input: CreateLocalPlay
     ? (input.tracks ?? [])
     : new DuplicateDetector().unique(input.tracks ?? []);
 
+  let sourceProvider = input.sourceProvider;
+  let sourcePlaylistId = input.sourcePlaylistId;
+  let coverImageUrl = input.coverImageUrl;
+
+  if (input.targetProvider) {
+    if (input.targetProvider === 'amazon_music') {
+      throw new ProviderUnavailableError(
+        'amazon_music',
+        'Amazon Music is not available. Official API access is not configured.',
+      );
+    }
+    const adapter = getProvider(input.targetProvider);
+    const remote = await withProviderTokens(userId, input.targetProvider, async (tokens) => {
+      const created = await adapter.createPlaylist(tokens, {
+        name: input.name,
+        description: input.description,
+      });
+      const youtubeIds = uniqueTracks
+        .map((track) =>
+          track.youtubeVideoId ?? (track.provider === 'youtube' ? track.providerTrackId : undefined),
+        )
+        .filter((id): id is string => Boolean(id));
+      if (youtubeIds.length > 0 && input.targetProvider === 'youtube') {
+        await adapter.addTracksToPlaylist(tokens, created.providerPlaylistId, youtubeIds);
+      }
+      return created;
+    });
+    sourceProvider = input.targetProvider;
+    sourcePlaylistId = remote.providerPlaylistId;
+    coverImageUrl = remote.coverImageUrl ?? coverImageUrl;
+  }
+
   const playlist = await prisma.playlist.create({
     data: {
       userId,
       name: input.name,
       description: input.description,
-      coverImageUrl: input.coverImageUrl,
-      sourceProvider: input.sourceProvider ? toPrismaProvider(input.sourceProvider) : undefined,
-      sourcePlaylistId: input.sourcePlaylistId,
+      coverImageUrl,
+      sourceProvider: sourceProvider ? toPrismaProvider(sourceProvider) : undefined,
+      sourcePlaylistId,
       language: input.language,
       genre: input.genre,
       mood: input.mood,
@@ -110,23 +143,72 @@ export async function deletePlaylist(userId: string, playlistId: string): Promis
   await prisma.playlist.delete({ where: { id: playlistId } });
 }
 
+function remoteTrackIdForProvider(provider: ProviderId, result: TrackResult): string | undefined {
+  if (provider === 'youtube') {
+    return result.youtubeVideoId ?? (result.provider === 'youtube' ? result.providerTrackId : undefined);
+  }
+  if (provider === 'spotify') {
+    return result.spotifyId ?? (result.provider === 'spotify' ? result.providerTrackId : undefined);
+  }
+  return undefined;
+}
+
+async function syncRemotePlaylistTrack(
+  userId: string,
+  playlist: Awaited<ReturnType<typeof getPlaylist>>,
+  result: TrackResult,
+  action: 'add' | 'remove',
+): Promise<void> {
+  if (!playlist.sourceProvider || !playlist.sourcePlaylistId) {
+    return;
+  }
+  const provider = fromPrismaProvider(playlist.sourceProvider);
+  const remoteId = remoteTrackIdForProvider(provider, result);
+  if (!remoteId) {
+    return;
+  }
+  const adapter = getProvider(provider);
+  const remotePlaylistId = playlist.sourcePlaylistId;
+  try {
+    await withProviderTokens(userId, provider, async (tokens) => {
+      if (action === 'add') {
+        await adapter.addTracksToPlaylist(tokens, remotePlaylistId, [remoteId]);
+      } else {
+        await adapter.removeTracksFromPlaylist(tokens, remotePlaylistId, [remoteId]);
+      }
+    });
+  } catch (error) {
+    if (action === 'remove' && error instanceof NotFoundError) {
+      return;
+    }
+    throw error;
+  }
+}
+
 export async function addTrackToPlaylist(userId: string, playlistId: string, result: TrackResult) {
   const playlist = await getPlaylist(userId, playlistId);
   const existingResults: TrackResult[] = playlist.tracks.map((item) => ({
-    provider: result.provider,
+    provider: item.track.youtubeVideoId
+      ? 'youtube'
+      : item.track.spotifyId
+        ? 'spotify'
+        : result.provider,
     providerTrackId:
-      item.track.spotifyId ?? item.track.youtubeVideoId ?? item.track.amazonMusicId ?? item.track.id,
+      item.track.youtubeVideoId ?? item.track.spotifyId ?? item.track.amazonMusicId ?? item.track.id,
     title: item.track.title,
     artist: item.track.artist,
     album: item.track.album ?? undefined,
     durationMs: item.track.durationMs ?? undefined,
     isrc: item.track.isrc ?? undefined,
+    youtubeVideoId: item.track.youtubeVideoId ?? undefined,
+    spotifyId: item.track.spotifyId ?? undefined,
   }));
   const detector = new DuplicateDetector();
   detector.unique(existingResults);
   if (detector.has(result)) {
     throw new DuplicateTrackError();
   }
+  await syncRemotePlaylistTrack(userId, playlist, result, 'add');
   const track = await upsertTrack(result);
   const position = playlist.tracks.length;
   await prisma.playlistTrack.create({
@@ -137,10 +219,32 @@ export async function addTrackToPlaylist(userId: string, playlistId: string, res
 
 export async function removeTrackFromPlaylist(userId: string, playlistId: string, trackId: string) {
   const playlist = await getPlaylist(userId, playlistId);
+  const removed = playlist.tracks.find((item) => item.trackId === trackId);
   const remaining = playlist.tracks.filter((item) => item.trackId !== trackId);
-  if (remaining.length === playlist.tracks.length) {
+  if (!removed || remaining.length === playlist.tracks.length) {
     throw new NotFoundError('That song is not in this playlist.');
   }
+  await syncRemotePlaylistTrack(
+    userId,
+    playlist,
+    {
+      provider: removed.track.youtubeVideoId
+        ? 'youtube'
+        : removed.track.spotifyId
+          ? 'spotify'
+          : 'youtube',
+      providerTrackId:
+        removed.track.youtubeVideoId ??
+        removed.track.spotifyId ??
+        removed.track.amazonMusicId ??
+        removed.track.id,
+      title: removed.track.title,
+      artist: removed.track.artist,
+      youtubeVideoId: removed.track.youtubeVideoId ?? undefined,
+      spotifyId: removed.track.spotifyId ?? undefined,
+    },
+    'remove',
+  );
   await prisma.$transaction([
     prisma.playlistTrack.deleteMany({ where: { playlistId, trackId } }),
     ...remaining.map((item, index) =>
@@ -186,13 +290,15 @@ export async function createPlaylistOnProvider(
       const query = `${item.track.title} ${item.track.artist}`;
       const candidates = await adapter.searchTracks(tokens, { query, limit: 5 });
       const source: TrackResult = {
-        provider,
-        providerTrackId: item.track.id,
+        provider: item.track.spotifyId ? 'spotify' : item.track.youtubeVideoId ? 'youtube' : provider,
+        providerTrackId: item.track.spotifyId ?? item.track.youtubeVideoId ?? item.track.id,
         title: item.track.title,
         artist: item.track.artist,
         album: item.track.album ?? undefined,
         durationMs: item.track.durationMs ?? undefined,
         isrc: item.track.isrc ?? undefined,
+        spotifyId: item.track.spotifyId ?? undefined,
+        youtubeVideoId: item.track.youtubeVideoId ?? undefined,
       };
       const decision = matchTrack(source, candidates);
       if (decision.best && !decision.best.needsReview) {

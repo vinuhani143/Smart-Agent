@@ -1,23 +1,27 @@
 import { randomBytes } from 'node:crypto';
 import type { Request, Response } from 'express';
-import { z } from 'zod';
 import { getEnv } from '../config/env';
 import { prisma } from '../config/prisma';
 import { parseProviderId, requireEnabledProvider, toPrismaProvider } from '../providers/ProviderRegistry';
 import { createSession } from '../services/AuthService';
-import { deleteMusicAccount, saveMusicAccount } from '../services/TokenService';
-import { OAuthFailedError } from '../types/errors';
+import { disconnectMusicAccount, saveMusicAccount } from '../services/TokenService';
+import { OAuthCancelledError, OAuthFailedError } from '../types/errors';
+import type { ProviderId } from '../types/provider';
 import { randomUrlToken, toPkceChallenge } from '../utils/crypto';
 import { logger } from '../utils/logger';
 
-const providerParam = z.enum(['spotify', 'google']);
-
-function providerFromParam(param: string) {
-  const parsed = providerParam.parse(param);
-  return parsed === 'google' ? 'youtube' : 'spotify';
+export function resolveOAuthProvider(param: string): ProviderId {
+  const value = param.toLowerCase();
+  if (value === 'google' || value === 'youtube') {
+    return 'youtube';
+  }
+  if (value === 'spotify') {
+    return 'spotify';
+  }
+  return parseProviderId(value);
 }
 
-function oauthRedirect(status: 'success' | 'error', message?: string): string {
+function oauthRedirect(status: 'success' | 'error' | 'cancelled', message?: string): string {
   const url = new URL(getEnv().APP_DEEP_LINK);
   url.searchParams.set('status', status);
   if (message) {
@@ -42,7 +46,7 @@ export async function startOAuth(req: Request, res: Response): Promise<void> {
   if (!userId) {
     throw new OAuthFailedError();
   }
-  const providerId = providerFromParam(String(req.params.provider));
+  const providerId = resolveOAuthProvider(String(req.params.provider));
   const adapter = requireEnabledProvider(providerId);
   const state = randomUrlToken(24);
   const codeVerifier = randomBytes(32).toString('base64url');
@@ -62,10 +66,33 @@ export async function startOAuth(req: Request, res: Response): Promise<void> {
   res.json({ authorizationUrl, provider: providerId });
 }
 
+function oauthProviderLabel(providerId: ProviderId): string {
+  if (providerId === 'youtube') {
+    return 'YouTube';
+  }
+  if (providerId === 'spotify') {
+    return 'Spotify';
+  }
+  return 'this music service';
+}
+
 export async function oauthCallback(req: Request, res: Response): Promise<void> {
+  const requestedProvider = resolveOAuthProvider(String(req.params.provider));
+  const label = oauthProviderLabel(requestedProvider);
   const errorParam = typeof req.query.error === 'string' ? req.query.error : undefined;
+  if (errorParam === 'access_denied') {
+    res.redirect(oauthRedirect('cancelled', `${label} connection was cancelled.`));
+    return;
+  }
   if (errorParam) {
-    res.redirect(oauthRedirect('error', 'The music service denied access.'));
+    res.redirect(
+      oauthRedirect(
+        'error',
+        requestedProvider === 'youtube'
+          ? 'Google could not complete YouTube sign-in. Please try again.'
+          : `${label} could not complete sign-in. Please try again.`,
+      ),
+    );
     return;
   }
 
@@ -101,7 +128,13 @@ export async function oauthCallback(req: Request, res: Response): Promise<void> 
     logger.warn('OAuth callback failed', {
       message: error instanceof Error ? error.message : 'unknown',
     });
-    res.redirect(oauthRedirect('error', 'Could not connect the music service.'));
+    const message =
+      error instanceof OAuthCancelledError
+        ? error.message
+        : requestedProvider === 'youtube'
+          ? 'Could not connect YouTube. Check Google OAuth credentials and try again.'
+          : `Could not connect ${label}. Check the provider credentials and try again.`;
+    res.redirect(oauthRedirect('error', message));
   }
 }
 
@@ -110,7 +143,7 @@ export async function disconnectProvider(req: Request, res: Response): Promise<v
   if (!userId) {
     throw new OAuthFailedError();
   }
-  const providerId = parseProviderId(String(req.params.provider));
-  await deleteMusicAccount(userId, providerId);
+  const providerId = resolveOAuthProvider(String(req.params.provider));
+  await disconnectMusicAccount(userId, providerId);
   res.json({ ok: true, provider: providerId });
 }

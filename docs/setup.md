@@ -72,6 +72,8 @@ npx prisma generate --schema ../prisma/schema.prisma
 npx prisma migrate dev --schema ../prisma/schema.prisma --name init
 ```
 
+`prisma generate` writes the client to `backend/node_modules/.prisma/client` (see `output` in `prisma/schema.prisma`). The API imports `@prisma/client`, which re-exports that generated client.
+
 ## 6. Start backend
 
 ```bash
@@ -101,20 +103,36 @@ Press `a` to open the Android emulator, or scan the QR code with Expo Go.
 4. Restart the backend.
 5. In MusicMix, tap **Connect** on Spotify (Home or Settings).
 
-## 9. Configure Google OAuth
+## 9. Configure Google / YouTube OAuth
 
-1. In [Google Cloud Console](https://console.cloud.google.com/), create a project.
-2. Enable **YouTube Data API v3**.
-3. Create an OAuth 2.0 **Web application** client.
-4. Add authorized redirect URI: `http://localhost:4000/api/auth/google/callback`.
-5. Copy Client ID and Client Secret:
-   - `GOOGLE_CLIENT_ID`
-   - `GOOGLE_CLIENT_SECRET`
-   - `GOOGLE_REDIRECT_URI`
-6. Optional: create an API key as `YOUTUBE_API_KEY` (search still prefers a connected account).
-7. Restart the backend and tap **Connect** on YouTube.
+YouTube uses **Google OAuth 2.0** plus the **YouTube Data API v3**. Do not scrape YouTube or put client secrets in the mobile app.
 
-Configure the OAuth consent screen with the scopes listed in `docs/api-integration.md`.
+1. Open [Google Cloud Console](https://console.cloud.google.com/) and create (or select) a project.
+2. APIs & Services → Library → enable **YouTube Data API v3**.
+3. APIs & Services → OAuth consent screen:
+   - User type: External (or Internal for Workspace).
+   - Add the test user Google accounts you will connect.
+   - Scopes: add only `https://www.googleapis.com/auth/youtube` (manage the user’s YouTube account: list/create/update/delete playlists and playlist items). MusicMix does not request Gmail or Drive.
+4. APIs & Services → Credentials → Create credentials → **OAuth client ID** → application type **Web application**.
+5. Authorized redirect URIs — must match exactly:
+   - `http://localhost:4000/api/auth/google/callback`
+   - or `https://YOUR_PUBLIC_API/api/auth/google/callback` if the phone cannot reach localhost.
+6. Copy the client ID and client secret into `backend/.env`:
+
+```bash
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+GOOGLE_REDIRECT_URI=http://localhost:4000/api/auth/google/callback
+```
+
+Optional: create an API key as `YOUTUBE_API_KEY` for unauthenticated `search.list` / `videos.list`. Playlist writes still require a connected Google account.
+
+7. Restart the backend.
+8. In MusicMix Settings, tap **Connect YouTube**. After success, Settings shows **Connected** and the YouTube channel display name.
+
+Tokens are encrypted in PostgreSQL. Refresh tokens never leave the backend. `POST /api/auth/google/disconnect` revokes the Google token (best-effort) and deletes the stored account.
+
+If Google returns `access_denied`, the app reports that the connection was cancelled. If the account has no YouTube channel, reconnect after creating one at youtube.com.
 
 ## 10. Build the Android app
 

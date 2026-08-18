@@ -32,7 +32,11 @@ export function useSearch(query: string, filters: SearchFilters, enabled: boolea
       const range = durationRange(filters.duration);
       if (range.durationMinMs) params.set('durationMinMs', String(range.durationMinMs));
       if (range.durationMaxMs) params.set('durationMaxMs', String(range.durationMaxMs));
-      return apiFetch<{ tracks: TrackResult[] }>(`/api/search?${params.toString()}`);
+      const path =
+        filters.provider && filters.provider !== 'all'
+          ? `/api/search/${filters.provider}?${params.toString()}`
+          : `/api/search?${params.toString()}`;
+      return apiFetch<{ tracks: TrackResult[] }>(path);
     },
   });
 }

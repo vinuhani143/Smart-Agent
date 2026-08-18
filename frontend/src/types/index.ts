@@ -14,6 +14,8 @@ export interface ProviderStatus {
   enabled: boolean;
   connected: boolean;
   providerUserId?: string;
+  displayName?: string | null;
+  imageUrl?: string | null;
   expiresAt?: string | null;
   unavailableReason?: string | null;
 }
@@ -29,6 +31,12 @@ export interface TrackResult {
   isrc?: string;
   thumbnailUrl?: string;
   explicit?: boolean;
+  originalTitle?: string;
+  metadataConfidence?: number;
+  parsedTitle?: string;
+  parsedArtist?: string;
+  youtubeVideoId?: string;
+  spotifyId?: string;
 }
 
 export interface PlaylistSummary {
@@ -65,6 +73,7 @@ export interface SearchFilters {
   yearFrom?: string;
   yearTo?: string;
   duration?: 'any' | 'short' | 'medium' | 'long';
+  provider?: 'all' | 'spotify' | 'youtube';
 }
 
 export interface GeneratePlaylistPayload {

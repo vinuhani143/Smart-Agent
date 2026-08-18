@@ -4,6 +4,8 @@
 
 generator client {
   provider = "prisma-client-js"
+  // Schema lives at repo root; the API package consumes the client.
+  output   = "../backend/node_modules/.prisma/client"
 }
 
 datasource db {
@@ -48,6 +50,8 @@ model MusicAccount {
   refreshToken   String?
   expiresAt      DateTime?
   scopes         String?
+  displayName    String?
+  imageUrl       String?
   createdAt      DateTime           @default(now())
   updatedAt      DateTime           @updatedAt
   user           User               @relation(fields: [userId], references: [id], onDelete: Cascade)

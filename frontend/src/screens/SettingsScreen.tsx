@@ -17,26 +17,35 @@ export function SettingsScreen() {
       <Text style={styles.title}>Settings</Text>
       <Text style={styles.section}>Music services</Text>
       {providers.isError ? <ErrorBanner message={toUserMessage(providers.error)} /> : null}
-      {(providers.data?.providers ?? []).map((provider) => (
-        <ProviderCard
-          key={provider.id}
-          provider={provider}
-          busy={connect.isPending || disconnect.isPending}
-          onConnect={() => {
-            if (provider.id === 'spotify') void connect.mutateAsync('spotify');
-            if (provider.id === 'youtube') void connect.mutateAsync('google');
-          }}
-          onDisconnect={() => void disconnect.mutateAsync(provider.id)}
-        />
-      ))}
+      {connect.isError ? <ErrorBanner message={toUserMessage(connect.error)} /> : null}
+      {disconnect.isError ? <ErrorBanner message={toUserMessage(disconnect.error)} /> : null}
+      {(providers.data?.providers ?? [])
+        .filter((provider) => provider.id !== 'amazon_music')
+        .map((provider) => (
+          <ProviderCard
+            key={provider.id}
+            provider={provider}
+            busy={connect.isPending || disconnect.isPending}
+            connectLabel={provider.id === 'youtube' ? 'Connect YouTube' : 'Connect Spotify'}
+            disconnectLabel={provider.id === 'youtube' ? 'Disconnect YouTube' : 'Disconnect Spotify'}
+            onConnect={() => {
+              if (provider.id === 'spotify') void connect.mutateAsync('spotify');
+              if (provider.id === 'youtube') void connect.mutateAsync('google');
+            }}
+            onDisconnect={() => void disconnect.mutateAsync(provider.id)}
+          />
+        ))}
       <Text style={styles.section}>About</Text>
       <Text style={styles.body}>
         MusicMix manages playlists through official provider APIs. It never downloads or rips audio.
-        Access tokens stay on the server.
+        Access tokens stay on the server. YouTube uses YouTube Data API v3.
       </Text>
       <Text style={styles.meta}>API: {API_URL}</Text>
-      <Text style={styles.link} onPress={() => void Linking.openURL('https://developer.spotify.com/documentation/web-api')}>
-        Spotify Web API docs
+      <Text
+        style={styles.link}
+        onPress={() => void Linking.openURL('https://developers.google.com/youtube/v3')}
+      >
+        YouTube Data API v3 docs
       </Text>
     </Screen>
   );

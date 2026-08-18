@@ -23,6 +23,20 @@ const config: ExpoConfig = {
     },
     predictiveBackGestureEnabled: false,
     softwareKeyboardLayoutMode: 'resize',
+    blockedPermissions: [
+      'android.permission.READ_EXTERNAL_STORAGE',
+      'android.permission.WRITE_EXTERNAL_STORAGE',
+      'android.permission.READ_MEDIA_IMAGES',
+      'android.permission.READ_MEDIA_VIDEO',
+      'android.permission.READ_MEDIA_AUDIO',
+      'android.permission.CAMERA',
+      'android.permission.RECORD_AUDIO',
+      'android.permission.ACCESS_FINE_LOCATION',
+      'android.permission.ACCESS_COARSE_LOCATION',
+      'android.permission.READ_CONTACTS',
+      'android.permission.READ_PHONE_STATE',
+      'android.permission.SYSTEM_ALERT_WINDOW',
+    ],
     intentFilters: [
       {
         action: 'VIEW',

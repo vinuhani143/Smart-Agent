@@ -19,7 +19,10 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(4000),
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
   API_PUBLIC_URL: z.string().url().default('http://localhost:4000'),
-  CORS_ORIGINS: z.string().default('http://localhost:8081,http://localhost:19006'),
+  /** Canonical production CORS list. Native Android does not use CORS. Never set to *. */
+  CORS_ALLOWED_ORIGINS: z.string().optional().default(''),
+  /** Legacy alias. Used when CORS_ALLOWED_ORIGINS is empty. */
+  CORS_ORIGINS: z.string().optional().default(''),
   APP_DEEP_LINK: z.string().min(1).default('musicmix://auth/callback'),
   JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
   TOKEN_ENCRYPTION_KEY: z
@@ -51,6 +54,9 @@ const envSchema = z.object({
 
 export type Env = z.infer<typeof envSchema>;
 
+const LOOPBACK = /localhost|127\.0\.0\.1|0\.0\.0\.0|10\.0\.2\.2/i;
+const TEST_JWT_MARKERS = /test-jwt-secret|changeme|password|dev-secret|local-secret/i;
+
 let cached: Env | undefined;
 
 export function loadEnv(): Env {
@@ -66,9 +72,25 @@ export function loadEnv(): Env {
     throw new Error(`Invalid environment configuration:\n${issues}`);
   }
 
-  assertProductionSafeUrls(parsed.data);
+  assertProductionConfig(parsed.data);
   cached = parsed.data;
   return cached;
+}
+
+export function corsOriginList(env: Pick<Env, 'CORS_ALLOWED_ORIGINS' | 'CORS_ORIGINS' | 'NODE_ENV'>): string[] {
+  const preferred = env.CORS_ALLOWED_ORIGINS?.trim() ?? '';
+  const legacy = env.CORS_ORIGINS?.trim() ?? '';
+  const raw = preferred || legacy;
+  if (!raw) {
+    if (env.NODE_ENV === 'production') {
+      return [];
+    }
+    return ['http://localhost:8081', 'http://localhost:19006'];
+  }
+  return raw
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter((origin) => origin.length > 0);
 }
 
 /** Production API origin must be HTTPS and must not be loopback. */
@@ -77,12 +99,74 @@ export function assertProductionSafeUrls(env: Pick<Env, 'NODE_ENV' | 'API_PUBLIC
     return;
   }
   const url = env.API_PUBLIC_URL.trim();
-  if (/localhost|127\.0\.0\.1|0\.0\.0\.0|10\.0\.2\.2/i.test(url)) {
+  if (LOOPBACK.test(url)) {
     throw new Error('API_PUBLIC_URL cannot be a loopback address in production.');
   }
   if (!url.startsWith('https://')) {
     throw new Error('API_PUBLIC_URL must be an https URL in production.');
   }
+}
+
+export function assertProductionDatabaseUrl(databaseUrl: string, nodeEnv: Env['NODE_ENV']): void {
+  if (nodeEnv !== 'production') {
+    return;
+  }
+  if (!/^postgres(ql)?:\/\//i.test(databaseUrl)) {
+    throw new Error('DATABASE_URL must be a postgresql:// connection string in production.');
+  }
+  if (LOOPBACK.test(databaseUrl)) {
+    throw new Error('DATABASE_URL cannot point at localhost in production.');
+  }
+  if (!/sslmode=(require|verify-full)|[?&]ssl=true/i.test(databaseUrl)) {
+    throw new Error('DATABASE_URL must enable TLS in production (sslmode=require or sslmode=verify-full).');
+  }
+}
+
+export function assertProductionCors(env: Pick<Env, 'NODE_ENV' | 'CORS_ALLOWED_ORIGINS' | 'CORS_ORIGINS'>): void {
+  if (env.NODE_ENV !== 'production') {
+    return;
+  }
+  const origins = corsOriginList(env);
+  if (origins.includes('*')) {
+    throw new Error('CORS_ALLOWED_ORIGINS cannot be * in production.');
+  }
+  if (origins.some((origin) => LOOPBACK.test(origin) || origin.startsWith('http://'))) {
+    throw new Error('CORS_ALLOWED_ORIGINS cannot include localhost or http origins in production.');
+  }
+}
+
+export function assertProductionSecrets(env: Pick<Env, 'NODE_ENV' | 'JWT_SECRET' | 'DEBUG_ERRORS'>): void {
+  if (env.NODE_ENV !== 'production') {
+    return;
+  }
+  if (TEST_JWT_MARKERS.test(env.JWT_SECRET)) {
+    throw new Error('JWT_SECRET looks like a development or test value. Generate a production secret.');
+  }
+  if (env.DEBUG_ERRORS === 'true') {
+    throw new Error('DEBUG_ERRORS must be false in production.');
+  }
+}
+
+/** Fail closed in production: no development URL/CORS/secret fallbacks. */
+export function assertProductionConfig(
+  env: Pick<
+    Env,
+    | 'NODE_ENV'
+    | 'API_PUBLIC_URL'
+    | 'DATABASE_URL'
+    | 'CORS_ALLOWED_ORIGINS'
+    | 'CORS_ORIGINS'
+    | 'JWT_SECRET'
+    | 'DEBUG_ERRORS'
+  >,
+): void {
+  if (env.NODE_ENV !== 'production') {
+    return;
+  }
+  assertProductionSafeUrls(env);
+  assertProductionDatabaseUrl(env.DATABASE_URL, env.NODE_ENV);
+  assertProductionCors(env);
+  assertProductionSecrets(env);
 }
 
 export function getEnv(): Env {
@@ -92,10 +176,4 @@ export function getEnv(): Env {
 /** Test-only: drop the cached parse so later process.env changes are picked up. */
 export function resetEnvCache(): void {
   cached = undefined;
-}
-
-export function corsOriginList(env: Env): string[] {
-  return env.CORS_ORIGINS.split(',')
-    .map((origin) => origin.trim())
-    .filter((origin) => origin.length > 0);
 }

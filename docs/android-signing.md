@@ -1,42 +1,34 @@
-# Android signing (EAS) — do not build yet
+# Android signing (EAS) — do not build in this step
 
-Do **not** run a production APK/AAB in this step. Do **not** commit keystores or credentials.
+Do **not** run `eas build --platform android --profile production` yet. Do **not** commit keystores.
 
-Package identifier already in `frontend/app.config.ts`: `com.musicmix.app`. Version `1.0.0`, `android.versionCode` `1`.
+| Field | Value |
+| --- | --- |
+| Application label | Expo `name`: **MusicMix** (no separate `android.label` field) |
+| Package | `com.musicmix.app` |
+| version | `1.0.0` |
+| versionCode | `1` |
 
-## EAS login and project
+## Profiles (`frontend/eas.json`)
+
+| Profile | Output | Distribution | `EXPO_PUBLIC_API_URL` |
+| --- | --- | --- | --- |
+| development | APK + dev client | internal | Explicit `http://127.0.0.1:4000` |
+| preview | APK | internal testers | Placeholder HTTPS until CFG-2 |
+| production | AAB (`app-bundle`) | Play | Placeholder HTTPS until CFG-2 |
+
+Backend secrets must **never** appear in `eas.json` or the mobile bundle. Set `EXPO_PUBLIC_API_URL` in EAS Environment (production/preview) when the real domain exists. Use EAS Secrets / env for that public URL only — not `DATABASE_URL`, JWT, token encryption, OAuth client secrets, AI keys, or `INTERNAL_CLEANUP_KEY`.
 
 ```bash
 cd frontend
 npx eas-cli login
 npx eas-cli init
-```
-
-Link the Expo project. Do not invent a second Android package name if `com.musicmix.app` is already registered.
-
-## Credentials / keystore
-
-```bash
 npx eas-cli credentials
 ```
 
-Use EAS-managed credentials or upload an existing keystore. Keep the keystore password in a secret manager, not git.
-
-## Profiles (`frontend/eas.json`)
-
-| Profile | Output | `EXPO_PUBLIC_API_URL` |
-| --- | --- | --- |
-| development | Dev client | Explicit `http://127.0.0.1:4000` |
-| preview | APK (internal) | Placeholder `https://YOUR_PRODUCTION_BACKEND_DOMAIN` |
-| production | AAB | Placeholder `https://YOUR_PRODUCTION_BACKEND_DOMAIN` |
-
-Replace the HTTPS placeholder with the real API origin before a store build. Production builds **fail** if the URL is missing or loopback.
-
-## Commands (do not run for this release-blocker step)
+Commands **not** run in STEP 10:
 
 ```bash
 npx eas-cli build --platform android --profile preview
 npx eas-cli build --platform android --profile production
 ```
-
-APK is for internal testing. Play Store production uses AAB (`app-bundle`).

@@ -1,20 +1,30 @@
-# Android QA checklist
+# Android device QA (final manual checklist)
 
-All device/emulator rows are **BLOCKED** until a physical device or emulator is available. Do not mark PASS without running them.
+All rows are **BLOCKED** until a real device or emulator run is completed. Do not mark PASS without testing. Do not produce APK/AAB in STEP 10.
 
-| Area | Checks | Status |
+| # | Test | Status |
 | --- | --- | --- |
-| Login / session | First launch session, recovery code shown, warning visible | BLOCKED |
-| OAuth redirect | Spotify and YouTube return to `musicmix://auth/callback` | BLOCKED |
-| Home | Cards, connect status, no clipped text | BLOCKED |
-| Search | Debounce, Unicode, empty, error | BLOCKED |
-| AI Playlist | 503 when unconfigured; confirm before create | BLOCKED |
-| Custom playlist | Create, add, remove, rename, **reorder up/down** | BLOCKED |
-| Conversion | Review low-confidence; create once | BLOCKED |
-| Settings | Disconnect, delete account, legal drafts, dark mode | BLOCKED |
-| Dark mode | Light/dark/system | BLOCKED |
-| Keyboard | Search and create forms, IME insets | BLOCKED |
-| Back button | Onboarding, playlist detail, convert | BLOCKED |
-| Small / large screen | Portrait, reachability | BLOCKED |
-| Accessibility / TalkBack | Labels, 44pt targets, not color-only | BLOCKED (static labels present; TalkBack not run) |
-| Offline / slow network | Error copy, no crash, no duplicate create | BLOCKED |
+| 1 | Install APK | BLOCKED |
+| 2 | Launch app | BLOCKED |
+| 3 | Onboarding | BLOCKED |
+| 4 | Home | BLOCKED |
+| 5 | Spotify connection | BLOCKED (OAuth not live) |
+| 6 | YouTube connection | BLOCKED (OAuth not live) |
+| 7 | Search | BLOCKED |
+| 8 | Custom playlist | BLOCKED |
+| 9 | Reorder playlist | BLOCKED |
+| 10 | AI playlist | BLOCKED (credentials / device) |
+| 11 | Playlist conversion | BLOCKED |
+| 12 | Settings | BLOCKED |
+| 13 | Dark mode | BLOCKED |
+| 14 | Keyboard | BLOCKED |
+| 15 | Android back button | BLOCKED |
+| 16 | Offline mode | BLOCKED |
+| 17 | Slow network | BLOCKED |
+| 18 | Logout / session clear | BLOCKED |
+| 19 | Account deletion | BLOCKED |
+| 20 | Privacy page | BLOCKED |
+| 21 | Terms page | BLOCKED |
+| 22 | TalkBack | BLOCKED |
+
+Static accessibility labels exist in code. That is not TalkBack verification.

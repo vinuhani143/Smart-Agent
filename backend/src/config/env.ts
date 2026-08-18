@@ -14,9 +14,39 @@ for (const file of envFiles) {
   }
 }
 
+/**
+ * Render and similar hosts often omit sslmode on DATABASE_URL while still requiring TLS.
+ * Mutate process.env before PrismaClient is constructed. Never log the URL.
+ */
+export function withProductionTls(databaseUrl: string): string {
+  const url = databaseUrl.trim();
+  if (!url) {
+    return url;
+  }
+  if (/sslmode=|[?&]ssl=true/i.test(url)) {
+    return url;
+  }
+  const sep = url.includes('?') ? '&' : '?';
+  return `${url}${sep}sslmode=require`;
+}
+
+export function applyProductionDatabaseTls(): void {
+  if (process.env.NODE_ENV !== 'production') {
+    return;
+  }
+  const current = process.env.DATABASE_URL;
+  if (!current) {
+    return;
+  }
+  process.env.DATABASE_URL = withProductionTls(current);
+}
+
+applyProductionDatabaseTls();
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(4000),
+  HOST: z.string().min(1).default('0.0.0.0'),
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
   API_PUBLIC_URL: z.string().url().default('http://localhost:4000'),
   /** Canonical production CORS list. Native Android does not use CORS. Never set to *. */

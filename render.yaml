@@ -1,0 +1,60 @@
+# MusicMix API — Render Blueprint
+# Fill dashboard values for sync: false keys. Do not put secrets in this file.
+
+databases:
+  - name: musicmix-db
+    postgresMajorVersion: "16"
+
+services:
+  - type: web
+    name: musicmix-api
+    runtime: node
+    rootDir: backend
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: npm run prisma:deploy && npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: musicmix-db
+          property: connectionString
+      - key: JWT_SECRET
+        sync: false
+      - key: TOKEN_ENCRYPTION_KEY
+        sync: false
+      - key: API_PUBLIC_URL
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: APP_DEEP_LINK
+        value: musicmix://auth/callback
+      - key: DEBUG_ERRORS
+        value: "false"
+      - key: AMAZON_MUSIC_ENABLED
+        value: "false"
+      - key: SPOTIFY_CLIENT_ID
+        sync: false
+      - key: SPOTIFY_CLIENT_SECRET
+        sync: false
+      - key: SPOTIFY_REDIRECT_URI
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        sync: false
+      - key: YOUTUBE_API_KEY
+        sync: false
+      - key: AI_PROVIDER
+        sync: false
+      - key: AI_API_KEY
+        sync: false
+      - key: AI_MODEL
+        sync: false
+      - key: AI_BASE_URL
+        sync: false
+      - key: INTERNAL_CLEANUP_KEY
+        sync: false

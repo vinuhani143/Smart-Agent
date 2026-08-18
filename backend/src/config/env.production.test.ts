@@ -6,6 +6,7 @@ import {
   assertProductionDatabaseUrl,
   assertProductionSafeUrls,
   corsOriginList,
+  withProductionTls,
 } from './env';
 
 describe('assertProductionSafeUrls', () => {
@@ -94,6 +95,15 @@ describe('production CORS and database', () => {
         'production',
       ),
     );
+  });
+
+  it('appends sslmode=require without printing the connection string', () => {
+    const input = 'postgresql://USER:PASSWORD@db.example:5432/musicmix';
+    const result = withProductionTls(input);
+    assert.match(result, /sslmode=require/);
+    assert.equal(result.startsWith('postgresql://USER:PASSWORD@db.example:5432/musicmix'), true);
+    const already = 'postgresql://USER:PASSWORD@db.example:5432/musicmix?sslmode=verify-full';
+    assert.equal(withProductionTls(already), already);
   });
 
   it('rejects development JWT markers in production', () => {

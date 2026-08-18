@@ -13,6 +13,7 @@
     "frontend:android": "npm run android --prefix frontend",
     "prisma:generate": "npm run prisma:generate --prefix backend",
     "prisma:migrate": "npm run prisma:migrate --prefix backend",
+    "prisma:deploy": "npm run prisma:deploy --prefix backend",
     "prisma:validate": "npx prisma validate --schema prisma/schema.prisma",
     "release-check": "node scripts/release-check.mjs"
   },

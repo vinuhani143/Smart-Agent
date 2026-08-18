@@ -5,8 +5,14 @@ import { logger } from './utils/logger';
 async function main(): Promise<void> {
   const env = loadEnv();
   const app = createApp(env);
-  app.listen(env.PORT, () => {
-    logger.info(`MusicMix API listening on ${env.API_PUBLIC_URL} (port ${env.PORT})`);
+  const server = app.listen(env.PORT, env.HOST, () => {
+    logger.info(`MusicMix API listening on ${env.HOST}:${env.PORT} (${env.API_PUBLIC_URL})`);
+  });
+  server.on('error', (error: unknown) => {
+    logger.error('MusicMix API listen failed', {
+      message: error instanceof Error ? error.message : 'unknown',
+    });
+    process.exit(1);
   });
 }
 

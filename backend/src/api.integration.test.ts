@@ -81,11 +81,17 @@ describe('health and AI configuration', () => {
     assert.equal(status, 200);
     assert.equal(body.ok, true);
     assert.equal(body.service, 'musicmix-backend');
-    assert.ok(body.database === 'up' || body.database === 'down');
+    assert.equal(body.database, 'up');
     const providers = body.providers as Record<string, string>;
     assert.ok(providers.spotify === 'configured' || providers.spotify === 'not_configured');
-    assert.equal(JSON.stringify(body).includes('SPOTIFY_CLIENT_SECRET'), false);
-    assert.equal(JSON.stringify(body).includes('AI_API_KEY'), false);
+    const serialized = JSON.stringify(body);
+    assert.equal(serialized.includes('SPOTIFY_CLIENT_SECRET'), false);
+    assert.equal(serialized.includes('AI_API_KEY'), false);
+    assert.equal(serialized.includes('DATABASE_URL'), false);
+    assert.equal(serialized.includes('JWT_SECRET'), false);
+    assert.equal(serialized.includes('TOKEN_ENCRYPTION_KEY'), false);
+    assert.equal(serialized.includes('accessToken'), false);
+    assert.equal(serialized.includes('refreshToken'), false);
   });
 
   it('reports release readiness without secrets', async () => {

@@ -1,5 +1,5 @@
-import { CreatePlaylistScreen } from '@/screens/CreatePlaylistScreen';
+import { CreateHubScreen } from '@/screens/CreateHubScreen';
 
 export default function CreateRoute() {
-  return <CreatePlaylistScreen />;
+  return <CreateHubScreen />;
 }

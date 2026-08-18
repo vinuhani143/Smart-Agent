@@ -52,6 +52,25 @@ interface AnthropicResponse {
   error?: { message?: string };
 }
 
+export function describeAiConfig(): {
+  configured: boolean;
+  provider: string | null;
+  modelConfigured: boolean;
+  apiKeyConfigured: boolean;
+} {
+  const env = getEnv();
+  const provider = env.AI_PROVIDER.trim().toLowerCase() || null;
+  const modelConfigured = Boolean(env.AI_MODEL.trim());
+  const apiKeyConfigured = Boolean(env.AI_API_KEY.trim());
+  const compatibleNeedsUrl = provider === 'openai-compatible' ? Boolean(env.AI_BASE_URL.trim()) : true;
+  return {
+    configured: Boolean(provider && modelConfigured && apiKeyConfigured && compatibleNeedsUrl),
+    provider,
+    modelConfigured,
+    apiKeyConfigured,
+  };
+}
+
 export function requireAiConfig(): { apiKey: string; model: string; baseUrl: string; provider: string } {
   const env = getEnv();
   const apiKey = env.AI_API_KEY.trim();

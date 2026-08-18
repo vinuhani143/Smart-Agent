@@ -1,198 +1,178 @@
-import { useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
-import { Searchbar, Text } from 'react-native-paper';
+import { useCallback, useMemo, useState, type ReactElement } from 'react';
+import { FlatList, StyleSheet, Text, View } from 'react-native';
+import { Chip } from '@/components/Chip';
 import { EmptyState } from '@/components/EmptyState';
-import { ErrorBanner } from '@/components/ErrorBanner';
-import { FilterBar } from '@/components/FilterBar';
+import { ErrorState } from '@/components/ErrorState';
 import { Screen } from '@/components/Screen';
-import { TrackCard } from '@/components/TrackCard';
-import { colors } from '@/constants/theme';
-import { useAddTrack, usePlaylists } from '@/hooks/usePlaylists';
-import { useSearch } from '@/hooks/useSearch';
-import { useProviders } from '@/hooks/useProviders';
-import { useUiStore } from '@/store/uiStore';
+import { SkeletonBlock } from '@/components/LoadingState';
+import { TrackRow } from '@/components/TrackRow';
+import { AppInput } from '@/components/AppInput';
 import { isAmazonMusicLive } from '@/constants/providers';
+import { useDebouncedValue } from '@/hooks/useDebouncedValue';
+import { useProviders } from '@/hooks/useProviders';
+import { useInfiniteSearch } from '@/hooks/useSearch';
+import { useAppTheme } from '@/theme/AppThemeProvider';
 import type { SearchFilters, TrackResult } from '@/types';
+import { trackKey } from '@/utils/duplicates';
 import { toUserMessage } from '@/utils/errors';
 
-const BASE_PROVIDERS: Array<NonNullable<SearchFilters['provider']>> = ['all', 'spotify', 'youtube'];
+type Scope = NonNullable<SearchFilters['provider']>;
+
+function SearchSkeleton() {
+  return (
+    <View style={styles.skeletonList}>
+      {Array.from({ length: 6 }).map((_, index) => (
+        <View key={index} style={styles.skeletonRow}>
+          <SkeletonBlock width={56} height={56} />
+          <View style={styles.skeletonCopy}>
+            <SkeletonBlock height={16} width="70%" />
+            <SkeletonBlock height={12} width="45%" />
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
 
 export function SearchScreen() {
+  const { colors } = useAppTheme();
   const [query, setQuery] = useState('');
-  const [submitted, setSubmitted] = useState('');
-  const [pendingTrack, setPendingTrack] = useState<TrackResult | null>(null);
-  const filters = useUiStore((state) => state.filters);
-  const setFilters = useUiStore((state) => state.setFilters);
-  const addTargetPlaylistId = useUiStore((state) => state.addTargetPlaylistId);
-  const search = useSearch(submitted, filters, submitted.length > 0);
-  const playlists = usePlaylists();
-  const addTrack = useAddTrack();
+  const [scope, setScope] = useState<Scope>('all');
+  const debounced = useDebouncedValue(query, 400);
   const providers = useProviders();
   const amazonLive = isAmazonMusicLive(providers.data?.providers);
-  const providerChips: Array<NonNullable<SearchFilters['provider']>> = amazonLive
-    ? [...BASE_PROVIDERS, 'amazon_music']
-    : BASE_PROVIDERS;
+  const searchQuery = debounced.trim();
+  const filters: SearchFilters = { provider: scope };
+  const search = useInfiniteSearch(searchQuery, filters, searchQuery.length >= 2);
 
-  async function addToPlaylist(playlistId: string, track: TrackResult): Promise<void> {
-    await addTrack.mutateAsync({ playlistId, track });
-    setPendingTrack(null);
+  const tracks = useMemo(() => {
+    const pages = search.data?.pages ?? [];
+    const seen = new Set<string>();
+    const out: TrackResult[] = [];
+    for (const page of pages) {
+      for (const track of page.tracks) {
+        const key = trackKey(track);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(track);
+      }
+    }
+    return out;
+  }, [search.data]);
+
+  const onEnd = useCallback(() => {
+    if (search.hasNextPage && !search.isFetchingNextPage) {
+      void search.fetchNextPage();
+    }
+  }, [search]);
+
+  const chips: { id: Scope; label: string }[] = [
+    { id: 'all', label: 'All' },
+    { id: 'spotify', label: 'Spotify' },
+    { id: 'youtube', label: 'YouTube' },
+    ...(amazonLive ? [{ id: 'amazon_music' as const, label: 'Amazon Music' }] : []),
+  ];
+
+  let body: ReactElement;
+  if (searchQuery.length < 2) {
+    body = (
+      <EmptyState
+        title="Start typing"
+        body="Search songs, artists, and albums. Results appear after you pause typing."
+      />
+    );
+  } else if (search.isError) {
+    body = (
+      <ErrorState
+        title="Search failed"
+        message={toUserMessage(search.error)}
+        onRetry={() => void search.refetch()}
+      />
+    );
+  } else if (search.isFetching && tracks.length === 0) {
+    body = <SearchSkeleton />;
+  } else if (tracks.length === 0) {
+    body = (
+      <EmptyState
+        title="No matching songs found"
+        body="Try a different title, artist, or music service."
+        actionLabel="Clear search"
+        onAction={() => setQuery('')}
+      />
+    );
+  } else {
+    body = (
+      <FlatList
+        data={tracks}
+        keyExtractor={(item) => trackKey(item)}
+        renderItem={({ item }) => <TrackRow track={item} />}
+        onEndReached={onEnd}
+        onEndReachedThreshold={0.4}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        ListFooterComponent={
+          search.isFetchingNextPage ? (
+            <Text style={{ color: colors.muted, textAlign: 'center', padding: 16 }}>Loading more…</Text>
+          ) : null
+        }
+        ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
+        contentContainerStyle={{ paddingBottom: 24 }}
+      />
+    );
   }
 
   return (
-    <Screen>
-      <Text style={styles.title}>Search</Text>
-      <Searchbar
-        placeholder="Search songs, artists or albums"
+    <Screen scroll={false} contentStyle={{ gap: 12 }}>
+      <Text style={[styles.title, { color: colors.text }]}>Search</Text>
+      <Text style={[styles.subtitle, { color: colors.muted }]}>Find songs across your connected services.</Text>
+      <AppInput
+        label="Search"
+        placeholder="Search songs, artists & albums"
         value={query}
         onChangeText={setQuery}
-        onSubmitEditing={() => setSubmitted(query.trim())}
-        onIconPress={() => setSubmitted(query.trim())}
-        style={styles.search}
-        inputStyle={{ color: colors.text }}
-        placeholderTextColor={colors.muted}
+        autoCorrect={false}
+        autoCapitalize="none"
+        returnKeyType="search"
+        accessibilityLabel="Search songs, artists and albums"
       />
-      <View>
-        <Text style={styles.filtersLabel}>Provider</Text>
-        <View style={styles.providerRow}>
-          {providerChips.map((provider) => (
-            <Pressable
-              key={provider}
-              onPress={() => setFilters({ ...filters, provider })}
-              style={[styles.chip, (filters.provider ?? 'all') === provider && styles.chipActive]}
-            >
-              <Text style={[styles.chipText, (filters.provider ?? 'all') === provider && styles.chipTextActive]}>
-                {provider === 'all'
-                  ? 'All'
-                  : provider === 'youtube'
-                    ? 'YouTube'
-                    : provider === 'amazon_music'
-                      ? 'Amazon Music'
-                      : 'Spotify'}
-              </Text>
-            </Pressable>
-          ))}
-          {!amazonLive ? (
-            <Pressable disabled style={[styles.chip, styles.chipDisabled]}>
-              <Text style={styles.chipText}>Amazon Music — Coming Soon</Text>
-            </Pressable>
-          ) : null}
-        </View>
-        <Text style={styles.filtersLabel}>Filters</Text>
-        <FilterBar filters={filters} onChange={setFilters} />
+      <View style={styles.chips}>
+        {chips.map((chip) => (
+          <Chip key={chip.id} label={chip.label} active={scope === chip.id} onPress={() => setScope(chip.id)} />
+        ))}
       </View>
-      {search.isError ? <ErrorBanner message={toUserMessage(search.error)} /> : null}
-      {addTrack.isError ? <ErrorBanner message={toUserMessage(addTrack.error)} /> : null}
-      {search.isSuccess && search.data.tracks.length === 0 ? (
-        <EmptyState title="No search results" body="Try another title, artist, or fewer filters." />
-      ) : null}
-      {(search.data?.tracks ?? []).map((track) => (
-        <TrackCard
-          key={`${track.provider}:${track.providerTrackId}`}
-          track={track}
-          onAdd={() => {
-            if (addTargetPlaylistId) {
-              void addToPlaylist(addTargetPlaylistId, track);
-              return;
-            }
-            setPendingTrack(track);
-          }}
-        />
-      ))}
-      {pendingTrack ? (
-        <View style={styles.picker}>
-          <Text style={styles.pickerTitle}>Add to a playlist</Text>
-          {(playlists.data?.playlists ?? []).map((playlist) => (
-            <Pressable
-              key={playlist.id}
-              style={styles.pickerItem}
-              onPress={() => void addToPlaylist(playlist.id, pendingTrack)}
-            >
-              <Text style={styles.chipTextActive}>{playlist.name}</Text>
-            </Pressable>
-          ))}
-          {(playlists.data?.playlists ?? []).length === 0 ? (
-            <Text style={styles.filtersLabel}>Create a playlist first, then add songs.</Text>
-          ) : null}
-          <Pressable onPress={() => setPendingTrack(null)}>
-            <Text style={styles.cancel}>Cancel</Text>
-          </Pressable>
-        </View>
-      ) : null}
-      {!submitted ? (
-        <EmptyState
-          title="Find a song"
-          body="Connect Spotify or YouTube in Settings, then search. Amazon Music stays unavailable until Amazon approves official API access."
-        />
-      ) : null}
+      <View style={styles.results}>{body}</View>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
   title: {
-    color: colors.text,
     fontSize: 28,
     fontWeight: '800',
   },
-  search: {
-    backgroundColor: colors.card,
-    borderRadius: 16,
+  subtitle: {
+    fontSize: 15,
+    marginBottom: 4,
   },
-  filtersLabel: {
-    color: colors.muted,
-    fontSize: 12,
-    fontWeight: '700',
-    marginBottom: 8,
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-  },
-  providerRow: {
+  chips: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
-    marginBottom: 12,
+    marginBottom: 8,
   },
-  chip: {
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.card,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+  results: {
+    flex: 1,
   },
-  chipActive: {
-    backgroundColor: colors.accentMuted,
-    borderColor: colors.accent,
+  skeletonList: {
+    gap: 10,
   },
-  chipDisabled: {
-    opacity: 0.6,
+  skeletonRow: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'center',
   },
-  chipText: {
-    color: colors.muted,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  chipTextActive: {
-    color: colors.text,
-    fontWeight: '700',
-  },
-  picker: {
-    backgroundColor: colors.card,
-    borderRadius: 16,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: colors.border,
+  skeletonCopy: {
+    flex: 1,
     gap: 8,
-  },
-  pickerTitle: {
-    color: colors.text,
-    fontWeight: '700',
-  },
-  pickerItem: {
-    paddingVertical: 8,
-  },
-  cancel: {
-    color: colors.cyan,
-    fontWeight: '600',
   },
 });

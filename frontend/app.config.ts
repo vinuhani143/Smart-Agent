@@ -7,7 +7,7 @@ const config: ExpoConfig = {
   orientation: 'portrait',
   icon: './assets/images/icon.png',
   scheme: 'musicmix',
-  userInterfaceStyle: 'dark',
+  userInterfaceStyle: 'automatic',
   ios: {
     supportsTablet: true,
     bundleIdentifier: 'com.musicmix.app',

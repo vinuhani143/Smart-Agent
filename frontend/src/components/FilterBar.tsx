@@ -1,5 +1,5 @@
-import { ScrollView, StyleSheet, Text, Pressable } from 'react-native';
-import { colors } from '@/constants/theme';
+import { ScrollView, StyleSheet } from 'react-native';
+import { Chip } from '@/components/Chip';
 import type { SearchFilters } from '@/types';
 
 const LANGUAGES = ['Any', 'Telugu', 'Hindi', 'English', 'Tamil', 'Korean'];
@@ -10,22 +10,6 @@ const DURATIONS = ['any', 'short', 'medium', 'long'] as const;
 interface FilterBarProps {
   filters: SearchFilters;
   onChange: (filters: SearchFilters) => void;
-}
-
-function Chip({
-  label,
-  active,
-  onPress,
-}: {
-  label: string;
-  active: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable onPress={onPress} style={[styles.chip, active && styles.chipActive]}>
-      <Text style={[styles.chipText, active && styles.chipTextActive]}>{label}</Text>
-    </Pressable>
-  );
 }
 
 export function FilterBar({ filters, onChange }: FilterBarProps) {
@@ -71,26 +55,5 @@ const styles = StyleSheet.create({
   row: {
     gap: 8,
     paddingVertical: 4,
-  },
-  chip: {
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.card,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  chipActive: {
-    backgroundColor: colors.accentMuted,
-    borderColor: colors.accent,
-  },
-  chipText: {
-    color: colors.muted,
-    fontSize: 12,
-    fontWeight: '600',
-    textTransform: 'capitalize',
-  },
-  chipTextActive: {
-    color: colors.text,
   },
 });

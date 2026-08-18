@@ -10,6 +10,7 @@ import {
   generateAiPlaylistSchema,
   generatePlaylist,
   getAiPlaylist,
+  getAiStatus,
   legacyGeneratePlaylistSchema,
   replaceAiPlaylistTrack,
   replaceAiTrackSchema,
@@ -19,6 +20,7 @@ import {
 
 export const aiRouter = Router();
 
+aiRouter.get('/status', requireAuth, getAiStatus);
 aiRouter.post('/playlists/generate', requireAuth, aiGenerateLimiter, validateBody(generateAiPlaylistSchema), generateAiPlaylist);
 aiRouter.get('/playlists/:id', requireAuth, getAiPlaylist);
 aiRouter.put('/playlists/:id', requireAuth, validateBody(updateAiPlaylistSchema), updateAiPlaylist);

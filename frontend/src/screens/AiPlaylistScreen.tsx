@@ -387,8 +387,8 @@ export function AiPlaylistScreen() {
       {view ? (
         <AppCard>
           <Artwork uri={coverUrl} style={styles.cover} accessibilityLabel="Playlist cover" />
-          <AppInput label="Generated title" value={title} onChangeText={setTitle} />
-          <AppInput label="Description" value={description} onChangeText={setDescription} multiline />
+          <AppInput label="Generated title" value={title} onChangeText={setTitle} maxLength={120} />
+          <AppInput label="Description" value={description} onChangeText={setDescription} multiline maxLength={500} />
           <Text style={[styles.meta, { color: colors.cyan }]}>
             {view.summary.trackCount} tracks · {formatDuration(actualMs)} · {view.summary.destinationProvider ?? destination ?? 'choose a service'}
           </Text>

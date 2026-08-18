@@ -23,7 +23,7 @@ export function Chip({ label, active, disabled, onPress }: ChipProps) {
         {
           backgroundColor: active ? colors.accentMuted : colors.card,
           borderColor: active ? colors.accent : colors.border,
-          minHeight: MIN_TOUCH - 4,
+          minHeight: MIN_TOUCH,
         },
         disabled && { opacity: 0.5 },
       ]}

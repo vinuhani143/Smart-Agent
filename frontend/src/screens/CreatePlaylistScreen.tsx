@@ -69,8 +69,8 @@ export function CreatePlaylistScreen() {
   return (
     <Screen>
       <Text style={[styles.title, { color: colors.text }]}>Custom playlist</Text>
-      <AppInput label="Name" value={name} onChangeText={setName} />
-      <AppInput label="Description" value={description} onChangeText={setDescription} multiline />
+      <AppInput label="Name" value={name} onChangeText={setName} maxLength={120} />
+      <AppInput label="Description" value={description} onChangeText={setDescription} multiline maxLength={2000} />
       <Text style={[styles.section, { color: colors.text }]}>Provider</Text>
       <ProviderSelector
         value={provider}

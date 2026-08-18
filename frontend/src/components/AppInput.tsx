@@ -14,6 +14,7 @@ interface AppInputProps {
   returnKeyType?: 'done' | 'search' | 'next';
   onSubmitEditing?: () => void;
   accessibilityLabel?: string;
+  maxLength?: number;
 }
 
 export function AppInput({
@@ -28,6 +29,7 @@ export function AppInput({
   returnKeyType,
   onSubmitEditing,
   accessibilityLabel,
+  maxLength,
 }: AppInputProps) {
   const { colors } = useAppTheme();
   return (
@@ -44,6 +46,7 @@ export function AppInput({
       onSubmitEditing={onSubmitEditing}
       mode="outlined"
       accessibilityLabel={accessibilityLabel ?? label}
+      maxLength={maxLength}
       style={[styles.input, multiline && styles.multiline, { backgroundColor: colors.card }]}
       outlineColor={colors.border}
       activeOutlineColor={colors.accent}

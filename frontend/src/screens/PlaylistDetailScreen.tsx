@@ -41,8 +41,8 @@ export function PlaylistDetailScreen() {
           <Artwork uri={playlist.coverImageUrl} style={styles.cover} accessibilityLabel={`${playlist.name} cover`} />
           {editing ? (
             <>
-              <AppInput label="Name" value={name} onChangeText={setName} />
-              <AppInput label="Description" value={description} onChangeText={setDescription} multiline />
+              <AppInput label="Name" value={name} onChangeText={setName} maxLength={120} />
+              <AppInput label="Description" value={description} onChangeText={setDescription} multiline maxLength={2000} />
               <AppButton
                 label="Save"
                 onPress={() => {

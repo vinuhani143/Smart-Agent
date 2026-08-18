@@ -1,4 +1,5 @@
 import {
+  ConflictError,
   InsufficientPermissionsError,
   NetworkError,
   NotFoundError,
@@ -77,6 +78,9 @@ export async function throwIfProviderError(response: Response): Promise<void> {
   }
   if (response.status === 429) {
     throw new RateLimitedError(Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : undefined);
+  }
+  if (response.status === 409) {
+    throw new ConflictError('The music service reported a conflict. Refresh and try again.');
   }
   if (response.status === 400) {
     throw new TokenInvalidError('The music service rejected the request. Please reconnect the account.');

@@ -1,5 +1,6 @@
 import { prisma } from '../config/prisma';
 import { DuplicateTrackError, NotFoundError, ProviderUnavailableError } from '../types/errors';
+import type { Track } from '@prisma/client';
 import type { ProviderId, TrackResult } from '../types/provider';
 import { fromPrismaProvider, getProvider, toPrismaProvider } from '../providers/ProviderRegistry';
 import { DuplicateDetector } from './DuplicateDetector';
@@ -106,33 +107,39 @@ export async function createLocalPlaylist(userId: string, input: CreateLocalPlay
     coverImageUrl = remote.coverImageUrl ?? coverImageUrl;
   }
 
-  const playlist = await prisma.playlist.create({
-    data: {
-      userId,
-      name: input.name,
-      description: input.description,
-      coverImageUrl,
-      sourceProvider: sourceProvider ? toPrismaProvider(sourceProvider) : undefined,
-      sourcePlaylistId,
-      language: input.language,
-      genre: input.genre,
-      mood: input.mood,
-      yearFrom: input.yearFrom,
-      yearTo: input.yearTo,
-      targetDurationMs: input.targetDurationMs,
-    },
-  });
+  const trackRows: Track[] = [];
+  for (const result of uniqueTracks) {
+    trackRows.push(await upsertTrack(result));
+  }
 
-  for (const [index, result] of uniqueTracks.entries()) {
-    const track = await upsertTrack(result);
-    await prisma.playlistTrack.create({
+  const playlist = await prisma.$transaction(async (tx) => {
+    const created = await tx.playlist.create({
       data: {
-        playlistId: playlist.id,
-        trackId: track.id,
-        position: index,
+        userId,
+        name: input.name,
+        description: input.description,
+        coverImageUrl,
+        sourceProvider: sourceProvider ? toPrismaProvider(sourceProvider) : undefined,
+        sourcePlaylistId,
+        language: input.language,
+        genre: input.genre,
+        mood: input.mood,
+        yearFrom: input.yearFrom,
+        yearTo: input.yearTo,
+        targetDurationMs: input.targetDurationMs,
       },
     });
-  }
+    if (trackRows.length > 0) {
+      await tx.playlistTrack.createMany({
+        data: trackRows.map((track, index) => ({
+          playlistId: created.id,
+          trackId: track.id,
+          position: index,
+        })),
+      });
+    }
+    return created;
+  });
 
   return getPlaylist(userId, playlist.id);
 }

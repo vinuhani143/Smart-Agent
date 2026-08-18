@@ -41,6 +41,27 @@ describe('errorHandler', () => {
     assert.deepEqual(body.error.details, { field: 'name' });
   });
 
+  it('preserves typed HTTP statuses for the API error matrix', () => {
+    const cases: Array<[number, string]> = [
+      [400, ErrorCode.VALIDATION_ERROR],
+      [401, ErrorCode.TOKEN_INVALID],
+      [403, ErrorCode.INSUFFICIENT_PERMISSIONS],
+      [404, ErrorCode.NOT_FOUND],
+      [409, ErrorCode.CONFLICT],
+      [429, ErrorCode.RATE_LIMITED],
+      [503, ErrorCode.NETWORK_ERROR],
+    ];
+    for (const [status, code] of cases) {
+      const req = { requestId: `req-${status}` } as Request;
+      const res = mockRes();
+      errorHandler(new AppError(code, 'User-safe message.', status), req, res, (() => undefined) as NextFunction);
+      const body = res.body as { error: Record<string, unknown> };
+      assert.equal(res.statusCode, status);
+      assert.equal(body.error.code, code);
+      assert.equal(body.error.message, 'User-safe message.');
+    }
+  });
+
   it('hides unexpected errors behind a generic production message', () => {
     const req = { requestId: 'req-audit-2' } as Request;
     const res = mockRes();

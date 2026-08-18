@@ -1,0 +1,154 @@
+// MusicMix database schema.
+// Provider tokens are stored encrypted at the application layer (see TokenService).
+// Prisma never receives plaintext secrets from the React Native client.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum MusicProviderName {
+  SPOTIFY
+  YOUTUBE
+  AMAZON_MUSIC
+}
+
+enum GenerationStatus {
+  PENDING
+  GENERATED
+  CONFIRMED
+  CREATED
+  FAILED
+}
+
+model User {
+  id                  String                       @id @default(cuid())
+  email               String?                      @unique
+  displayName         String?
+  createdAt           DateTime                     @default(now())
+  updatedAt           DateTime                     @updatedAt
+  musicAccounts       MusicAccount[]
+  playlists           Playlist[]
+  generationRequests  PlaylistGenerationRequest[]
+  oauthStates         OAuthState[]
+}
+
+/// Connected music-service account. accessToken and refreshToken MUST be
+/// application-encrypted ciphertext, never raw OAuth tokens, never sent to the client.
+model MusicAccount {
+  id             String             @id @default(cuid())
+  userId         String
+  provider       MusicProviderName
+  providerUserId String
+  accessToken    String
+  refreshToken   String?
+  expiresAt      DateTime?
+  scopes         String?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  user           User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider])
+  @@unique([provider, providerUserId])
+  @@index([userId])
+}
+
+model Track {
+  id             String          @id @default(cuid())
+  title          String
+  artist         String
+  album          String?
+  durationMs     Int?
+  releaseDate    DateTime?
+  isrc           String?
+  spotifyId      String?         @unique
+  youtubeVideoId String?         @unique
+  amazonMusicId  String?         @unique
+  thumbnailUrl   String?
+  language       String?
+  genre          String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  playlistTracks PlaylistTrack[]
+
+  @@index([isrc])
+  @@index([title, artist])
+}
+
+model Playlist {
+  id               String             @id @default(cuid())
+  userId           String
+  name             String
+  description      String?
+  coverImageUrl    String?
+  sourceProvider   MusicProviderName?
+  sourcePlaylistId String?
+  language         String?
+  genre            String?
+  mood             String?
+  yearFrom         Int?
+  yearTo           Int?
+  targetDurationMs Int?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  user             User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tracks           PlaylistTrack[]
+
+  @@index([userId])
+}
+
+model PlaylistTrack {
+  id         String   @id @default(cuid())
+  playlistId String
+  trackId    String
+  position   Int
+  addedAt    DateTime @default(now())
+  playlist   Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+  track      Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
+
+  @@unique([playlistId, trackId])
+  @@unique([playlistId, position])
+  @@index([trackId])
+}
+
+/// Saved generation job. Playlists are never created on a provider until the user confirms.
+model PlaylistGenerationRequest {
+  id               String             @id @default(cuid())
+  userId           String
+  prompt           String?
+  language         String?
+  mood             String?
+  genre            String?
+  yearFrom         Int?
+  yearTo           Int?
+  durationMinutes  Int?
+  allowDuplicates  Boolean            @default(false)
+  targetProvider   MusicProviderName?
+  status           GenerationStatus   @default(PENDING)
+  resultPlaylistId String?
+  candidateTracks  Json?
+  errorMessage     String?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  user             User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+/// Short-lived OAuth CSRF state + PKCE verifier. Never returned to the client.
+model OAuthState {
+  id           String            @id @default(cuid())
+  userId       String
+  provider     MusicProviderName
+  state        String            @unique
+  codeVerifier String?
+  expiresAt    DateTime
+  createdAt    DateTime          @default(now())
+  user         User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+}

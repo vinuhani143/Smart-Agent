@@ -51,7 +51,6 @@ export const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
   logger.error('Unhandled error', {
     requestId,
     name: err instanceof Error ? err.name : 'unknown',
-    message: err instanceof Error ? err.message : 'unknown',
   });
 
   let debugEnabled = false;

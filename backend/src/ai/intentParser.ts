@@ -305,7 +305,7 @@ export function isUnsafePlaylistPrompt(prompt: string): boolean {
   return (
     /\b(download|rip(?:ping)?|torrent|pirated?|crack(?:ed)?)\b/i.test(prompt) ||
     /\b(ignore (all )?(previous|prior) (instructions|prompts)|system prompt|you are now)\b/i.test(prompt) ||
-    /\b(drop table|insert into|union select|xp_cmdshell|;--)\b/i.test(prompt) ||
-    /\b(eval\s*\(|new Function\s*\(|<script|javascript:)\b/i.test(prompt)
+    /\b(drop table|insert into|union select|xp_cmdshell)\b|;--/i.test(prompt) ||
+    /\beval\s*\(|new\s+Function\s*\(|<script|javascript:/i.test(prompt)
   );
 }

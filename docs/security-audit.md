@@ -24,7 +24,7 @@ Checklist values:
 | Secure logging | **PASS** | Structured JSON logs. Secret **keys** (`refreshToken`, `authorization_code`, `client_secret`, `api_key`, `database_url`, …) are redacted. Request id, method, path (query stripped), status, duration are allowed. |
 | Error sanitization | **PASS** | Central `errorHandler`: `{ code, message, requestId }`. No stack traces. Token fields stripped from `details`. `DEBUG_ERRORS=true` may add `debug: err.name` only when `NODE_ENV !== production`. |
 | Database constraints | **PASS** | FKs with `onDelete: Cascade`. Uniques: `MusicAccount` `(userId, provider)` and `(provider, providerUserId)`; `PlaylistTrack` `(playlistId, trackId)` and `(playlistId, position)`; provider ids on `Track`. Indexes on user-owned lists. |
-| Dependency audit | **TODO** | See “Dependency audit” below. Re-run `npm audit` at release time. |
+| Dependency audit | **TODO** | High findings exist in Prisma CLI and Expo/Metro trees. No safe non-major fix in this step. Details below. |
 | AI safety | **PASS** | LLM returns intent/ranking/copy only. Backend calls provider APIs. Unsafe prompts (download/rip, injection, SQL, `eval`) are rejected. Output is parsed as JSON criteria, not executed. |
 | Duplicate request protection | **PASS** | UI loading/disabled buttons plus in-process `oncePerKey` on create playlist, conversion create, AI generate, AI create-on-provider. Conversion `CREATED` with a destination id returns the existing playlist. **TODO:** shared lock (Redis) for multi-instance. |
 | Production environment separation | **PASS** (templates) / **TODO** (deploy) | `.env.example` vs `.env.production.example`. Frontend warns if a non-dev build still points at localhost. Production API URL is not hardcoded in `eas.json`. |
@@ -44,6 +44,8 @@ See [privacy.md](./privacy.md). Summary: anonymous MusicMix user id, playlist/tr
 - Request id middleware, sanitized 500s, playlist list no longer over-fetches tracks, provider list omits token columns, PKCE verifier encryption, OAuth provider-mismatch rejection, JWT `algorithms: ['HS256']`.
 - In-process idempotency for create/convert/generate; conversion will not create a second destination playlist after `CREATED`.
 - Frontend 20s timeouts, session 401 recovery only for MusicMix session errors, https/http artwork URLs only.
+- Unsafe-prompt detector now matches `eval(`, `<script`, and SQL `;--` (trailing word-boundary was skipping those patterns).
+- Restored nested provider tests (`find src -name '*.test.ts'`).
 
 ## Remaining TODOs (release blockers in **bold**)
 
@@ -78,6 +80,36 @@ Revoked/expired provider tokens: `withProviderTokens` refreshes once; failures b
 - AI HTTP timeout 20s; generate endpoint 20 requests / 15 minutes / IP.
 - Model output cannot call Spotify/YouTube/Amazon or emit SQL/credentials that the backend executes.
 
-## Commands used for this audit
+## Dependency audit (2026-08-18)
 
-Recorded in the pull request and the STEP 8 report after typecheck, tests, `prisma validate`, and `npm audit`.
+Did **not** run `npm audit fix --force` (it would downgrade Prisma to 6.12 or Expo/React Native to incompatible majors).
+
+### Backend (`backend/`, including `npm audit --omit=dev`)
+
+| Package | Severity | Advisory | Impact on MusicMix | Recommended fix |
+| --- | --- | --- | --- | --- |
+| `deepmerge-ts` `<8` via `@prisma/client` → `prisma` → `@prisma/config` | high | [GHSA-ggr8-5vv4-36mx](https://github.com/advisories/GHSA-ggr8-5vv4-36mx) stack exhaustion on recursive merge | Prisma CLI/config, not request-body merging in Express. Low practical exploitability for the API. | Stay on Prisma 6.x until a 6.x patch, or plan a **separate** Prisma 7 upgrade. Do not downgrade to 6.12. |
+| `effect` (flagged via same Prisma tree) | high | [GHSA-38f7-945m-qr2g](https://github.com/advisories/GHSA-38f7-945m-qr2g) AsyncLocalStorage in Effect RPC | Installed `effect@3.21.0` is outside `<3.20.0`; npm still flags the Prisma parent range. | Same as above. |
+
+### Frontend (`frontend/`)
+
+| Package | Severity | Advisory | Impact | Recommended fix |
+| --- | --- | --- | --- | --- |
+| `image-size` via Metro / Expo | high | Infinite loops in ICNS/JXL/HEIF parsers | Bundler/dev tooling. MusicMix does not parse user-uploaded images with this library. | Wait for Expo SDK / Metro patch. `audit fix --force` would install `react-native@0.72`. |
+| `uuid` via `@expo/config-plugins` / xcode | moderate | Buffer bounds in uuid v3/v5/v6 | Prebuild/config plugins, not session ids. | Wait for Expo patch. Force-fix would install `expo@53`. |
+
+No **critical** advisories. Re-run `npm audit` before each release.
+
+## Commands executed
+
+```bash
+cd backend && npx tsc --noEmit -p tsconfig.json    # pass
+cd frontend && npx tsc --noEmit                    # pass
+npx prisma validate --schema prisma/schema.prisma  # pass
+cd backend && npm test                             # 146 pass
+cd frontend && npm test                            # 14 pass
+cd backend && npm audit                            # 4 high (Prisma tree)
+cd frontend && npm audit                           # 22 (8 moderate, 14 high) Expo/Metro tree
+cd frontend && npx expo-doctor                     # 21/21 pass
+npm run lint                                       # no lint script (frontend or backend)
+```

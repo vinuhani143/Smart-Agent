@@ -1,5 +1,12 @@
 # MusicMix API — Render Blueprint
 # Fill dashboard values for sync: false keys. Do not put secrets in this file.
+#
+# Required placeholders (set in the Render dashboard, not here):
+#   JWT_SECRET=<random secret 1>
+#   TOKEN_ENCRYPTION_KEY=<random secret 2>
+#   DATABASE_URL=<your Render PostgreSQL connection string>  (or fromDatabase below)
+#   API_PUBLIC_URL=https://YOUR-RENDER-SERVICE.onrender.com
+#   CORS_ALLOWED_ORIGINS=<your required origin>
 
 databases:
   - name: musicmix-db

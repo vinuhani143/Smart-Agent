@@ -53,18 +53,27 @@ The start command already runs `npm run prisma:deploy` before `npm start`.
 
 ## 4. Environment variables
 
-Set these in the Render Web Service dashboard. Values below are names only.
+Set these in the Render Web Service dashboard. **Do not put real secrets in git.** Values below are placeholders only.
 
 **Required (startup fails without them):**
 
-| Variable | Notes |
-| --- | --- |
-| `NODE_ENV` | `production` |
-| `DATABASE_URL` | Render Postgres URL (TLS required / appended) |
-| `JWT_SECRET` | At least 32 characters. `openssl rand -hex 32` |
-| `TOKEN_ENCRYPTION_KEY` | 64 hex characters. `openssl rand -hex 32` |
-| `API_PUBLIC_URL` | `https://YOUR-RENDER-SERVICE.onrender.com` (no trailing slash, no localhost) |
-| `CORS_ALLOWED_ORIGINS` | Comma-separated HTTPS web origins, or empty for native-only. Never `*` |
+```bash
+NODE_ENV=production
+JWT_SECRET=<random secret 1>
+TOKEN_ENCRYPTION_KEY=<random secret 2>
+DATABASE_URL=<your Render PostgreSQL connection string>
+API_PUBLIC_URL=https://YOUR-RENDER-SERVICE.onrender.com
+CORS_ALLOWED_ORIGINS=<your required origin>
+```
+
+| Variable | Placeholder | Notes |
+| --- | --- | --- |
+| `NODE_ENV` | `production` | Required |
+| `JWT_SECRET` | `<random secret 1>` | At least 32 characters. Generate: `openssl rand -hex 32` |
+| `TOKEN_ENCRYPTION_KEY` | `<random secret 2>` | 64 hex characters. Generate: `openssl rand -hex 32` |
+| `DATABASE_URL` | `<your Render PostgreSQL connection string>` | Internal URL when API and DB share a region. TLS required / appended. Never log this value. |
+| `API_PUBLIC_URL` | `https://YOUR-RENDER-SERVICE.onrender.com` | HTTPS, no trailing slash, no localhost |
+| `CORS_ALLOWED_ORIGINS` | `<your required origin>` | Comma-separated HTTPS web origins, or empty for native-only. Never `*` |
 
 **Recommended:**
 

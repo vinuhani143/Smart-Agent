@@ -7,12 +7,12 @@ Copy `.env.production.example` into a secret manager or server env. Production s
 | Variable | Required in production | Lives on | Notes |
 | --- | --- | --- | --- |
 | `NODE_ENV` | Yes (`production`) | Backend | |
-| `PORT` | Yes | Backend | Default 4000 |
-| `DATABASE_URL` | Yes | Backend | `postgresql://…` with `sslmode=require` (or `verify-full`). Not localhost. |
-| `API_PUBLIC_URL` | Yes | Backend | `https://YOUR_REAL_BACKEND_DOMAIN` — placeholder is **not** a live origin |
-| `CORS_ALLOWED_ORIGINS` | Yes (may be empty) | Backend | Comma-separated HTTPS web origins. Native Android does **not** use CORS. Never `*`. Legacy alias: `CORS_ORIGINS`. |
-| `JWT_SECRET` | Yes (≥32 chars) | Backend | `openssl rand -hex 32`. Not a test string. |
-| `TOKEN_ENCRYPTION_KEY` | Yes (64 hex chars) | Backend | AES-256-GCM key for provider tokens. `openssl rand -hex 32`. |
+| `PORT` | Yes | Backend | Render injects this. Local default 4000 if unset. |
+| `DATABASE_URL` | Yes | Backend | `<your Render PostgreSQL connection string>` with TLS (`sslmode=require` or `verify-full`). Not localhost. |
+| `API_PUBLIC_URL` | Yes | Backend | `https://YOUR-RENDER-SERVICE.onrender.com` — placeholder is **not** a live origin |
+| `CORS_ALLOWED_ORIGINS` | Yes (may be empty) | Backend | `<your required origin>` — comma-separated HTTPS web origins. Native Android does **not** use CORS. Never `*`. Legacy alias: `CORS_ORIGINS`. |
+| `JWT_SECRET` | Yes (≥32 chars) | Backend | `<random secret 1>`. `openssl rand -hex 32`. Not a test string. |
+| `TOKEN_ENCRYPTION_KEY` | Yes (64 hex chars) | Backend | `<random secret 2>`. AES-256-GCM key for provider tokens. `openssl rand -hex 32`. |
 | `APP_DEEP_LINK` | Yes | Backend | `musicmix://auth/callback` |
 | `DEBUG_ERRORS` | Must be `false` | Backend | Production refuses `true` |
 | `EXPO_PUBLIC_API_URL` | Yes for store/preview builds | **Frontend only** | HTTPS, not localhost. Same placeholder until CFG-2. |

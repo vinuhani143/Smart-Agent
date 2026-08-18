@@ -235,10 +235,14 @@ export function mergeGroundedIntent(
   ) {
     merged.tempo = proposed.tempo as TempoHint;
   }
-  if (proposed.sourceProvider === 'spotify' || proposed.sourceProvider === 'youtube' || proposed.sourceProvider === 'both') {
+  if (proposed.sourceProvider === 'spotify' || proposed.sourceProvider === 'youtube' || proposed.sourceProvider === 'amazon_music' || proposed.sourceProvider === 'both') {
     merged.sourceProvider = proposed.sourceProvider;
   }
-  if (proposed.destinationProvider === 'spotify' || proposed.destinationProvider === 'youtube') {
+  if (
+    proposed.destinationProvider === 'spotify' ||
+    proposed.destinationProvider === 'youtube' ||
+    proposed.destinationProvider === 'amazon_music'
+  ) {
     merged.destinationProvider = proposed.destinationProvider;
   }
 
@@ -278,8 +282,9 @@ export function intentFromUnknown(value: Record<string, unknown>): PlaylistInten
     energyLevel: energy === 'low' || energy === 'medium' || energy === 'high' ? energy : undefined,
     tempo: tempo === 'slow' || tempo === 'medium' || tempo === 'fast' ? tempo : undefined,
     sourceProvider:
-      source === 'spotify' || source === 'youtube' || source === 'both' ? source : undefined,
-    destinationProvider: destination === 'spotify' || destination === 'youtube' ? destination : undefined,
+      source === 'spotify' || source === 'youtube' || source === 'amazon_music' || source === 'both' ? source : undefined,
+    destinationProvider:
+      destination === 'spotify' || destination === 'youtube' || destination === 'amazon_music' ? destination : undefined,
   };
 }
 

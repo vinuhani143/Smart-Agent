@@ -60,6 +60,7 @@ Set at least:
 | `API_PUBLIC_URL` | Public origin of the backend |
 | `SPOTIFY_REDIRECT_URI` | Must match the Spotify dashboard |
 | `GOOGLE_REDIRECT_URI` | Must match the Google Cloud OAuth client |
+| `AMAZON_MUSIC_ENABLED` | Must stay `false` unless Amazon has approved Music Web API access |
 | `EXPO_PUBLIC_API_URL` | Backend URL the phone can reach |
 
 On an Android emulator, `localhost` is the emulator itself. Use `http://10.0.2.2:4000` for `EXPO_PUBLIC_API_URL` when the API runs on the host. On a physical device, use your LAN IP or a tunnel (ngrok, Cloudflare Tunnel) and add that origin to `CORS_ORIGINS`.
@@ -146,9 +147,43 @@ npx expo run:android
 
 Or a release APK after `eas build` / local Gradle assemble. Set `EXPO_PUBLIC_API_URL` to a reachable HTTPS API before shipping.
 
-Amazon Music remains disabled until Amazon grants official API credentials. Do not invent keys.
+Amazon Music remains **disabled** until Amazon grants official Music Web API access. Do not invent keys. Spotify and YouTube keep working while Amazon is off.
 
-## 11. Configure an AI provider (playlist generation)
+## 11. Configure Amazon Music (closed beta)
+
+Amazon Music Web API is a **closed beta**. MusicMix implements the official adapter (`AmazonMusicProvider`) and Login With Amazon OAuth, but it stays off unless Amazon has approved this app.
+
+**Amazon Music Web API access is subject to Amazon approval. The application does not bypass or work around Amazon's access restrictions.**
+
+1. Apply for [Amazon Music Web API](https://developer.amazon.com/docs/music/API_web_overview.html) access. Do not scrape Amazon Music or use unofficial clients.
+2. Create a Login With Amazon Security Profile. The **Security Profile ID** is sent as `x-api-key` (it is not the LWA Client ID).
+3. Add Allowed Return URL exactly: `http://localhost:4000/api/auth/amazon/callback` (or your public API URL).
+4. Copy values into `backend/.env` only (never `EXPO_PUBLIC_*`, never the mobile app):
+
+```bash
+AMAZON_MUSIC_ENABLED=false
+AMAZON_MUSIC_API_BASE_URL=https://api.music.amazon.dev
+AMAZON_LWA_CLIENT_ID=
+AMAZON_LWA_CLIENT_SECRET=
+AMAZON_MUSIC_SECURITY_PROFILE_ID=
+AMAZON_MUSIC_REDIRECT_URI=http://localhost:4000/api/auth/amazon/callback
+```
+
+`AMAZON_MUSIC_ENABLED` must remain `false` until credentials **and** Amazon approval exist. Setting the flag to `true` without a working Security Profile still keeps the adapter disabled (`not_configured`).
+
+Required LWA scopes:
+
+| Scope | Why |
+| --- | --- |
+| `music::profile` | `GET /v1/me` (id, name, subscription tier **only if Amazon returns it**) |
+| `music::catalog` | Search tracks and get track metadata |
+| `music::library` | List/create/update/delete playlists and playlist tracks (supersedes `music::library:read`) |
+
+The client secret stays on the backend. Refresh tokens are encrypted in PostgreSQL and never returned to the app.
+
+If Amazon is disabled, Settings shows **Unavailable** and **Learn about Amazon Music access**. There is no Connect button. Conversion and AI playlist screens show **Amazon Music — Coming Soon**.
+
+## 12. Configure an AI provider (playlist generation)
 
 AI playlist generation calls a real LLM **on the backend** to parse the request, rank search results, and write a title/description. It does **not** generate audio. If credentials are missing, `POST /api/ai/playlists/generate` returns a setup error instead of a fake playlist.
 
@@ -167,7 +202,7 @@ User prompts are sent to that provider. MusicMix stores the prompt and parsed in
 
 ## Convert a playlist
 
-1. Connect **both** Spotify and YouTube in Settings.
+1. Connect **Spotify** and **YouTube** in Settings. Amazon Music appears as a source/destination only when `AMAZON_MUSIC_ENABLED=true` and official credentials are configured; otherwise it is **Coming Soon**.
 2. Open **Convert Playlist** (`/convert`).
 3. Pick a source service and one of that account’s playlists, then the other service as destination.
 4. Tap **Find Matching Songs**. Nothing is created on the destination yet.

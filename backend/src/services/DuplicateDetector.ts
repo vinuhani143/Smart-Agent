@@ -20,15 +20,23 @@ export function spotifyIdOf(track: TrackResult): string | undefined {
   return track.spotifyId ?? (track.provider === 'spotify' ? track.providerTrackId : undefined);
 }
 
+export function amazonMusicIdOf(track: TrackResult): string | undefined {
+  return track.amazonMusicId ?? (track.provider === 'amazon_music' ? track.providerTrackId : undefined);
+}
+
 export function trackDuplicateKeys(track: TrackResult): string[] {
   const keys = [identityKey(track)];
   const youtubeId = youtubeVideoIdOf(track);
   const spotifyId = spotifyIdOf(track);
+  const amazonId = amazonMusicIdOf(track);
   if (youtubeId) {
     keys.push(`youtube:${youtubeId}`);
   }
   if (spotifyId) {
     keys.push(`spotify:${spotifyId}`);
+  }
+  if (amazonId) {
+    keys.push(`amazon:${amazonId}`);
   }
   keys.push(`provider:${track.provider}:${track.providerTrackId}`);
   if (track.isrc) {

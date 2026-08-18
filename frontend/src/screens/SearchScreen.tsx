@@ -9,11 +9,13 @@ import { TrackCard } from '@/components/TrackCard';
 import { colors } from '@/constants/theme';
 import { useAddTrack, usePlaylists } from '@/hooks/usePlaylists';
 import { useSearch } from '@/hooks/useSearch';
+import { useProviders } from '@/hooks/useProviders';
 import { useUiStore } from '@/store/uiStore';
+import { isAmazonMusicLive } from '@/constants/providers';
 import type { SearchFilters, TrackResult } from '@/types';
 import { toUserMessage } from '@/utils/errors';
 
-const PROVIDERS: Array<NonNullable<SearchFilters['provider']>> = ['all', 'spotify', 'youtube'];
+const BASE_PROVIDERS: Array<NonNullable<SearchFilters['provider']>> = ['all', 'spotify', 'youtube'];
 
 export function SearchScreen() {
   const [query, setQuery] = useState('');
@@ -25,6 +27,11 @@ export function SearchScreen() {
   const search = useSearch(submitted, filters, submitted.length > 0);
   const playlists = usePlaylists();
   const addTrack = useAddTrack();
+  const providers = useProviders();
+  const amazonLive = isAmazonMusicLive(providers.data?.providers);
+  const providerChips: Array<NonNullable<SearchFilters['provider']>> = amazonLive
+    ? [...BASE_PROVIDERS, 'amazon_music']
+    : BASE_PROVIDERS;
 
   async function addToPlaylist(playlistId: string, track: TrackResult): Promise<void> {
     await addTrack.mutateAsync({ playlistId, track });
@@ -47,17 +54,28 @@ export function SearchScreen() {
       <View>
         <Text style={styles.filtersLabel}>Provider</Text>
         <View style={styles.providerRow}>
-          {PROVIDERS.map((provider) => (
+          {providerChips.map((provider) => (
             <Pressable
               key={provider}
               onPress={() => setFilters({ ...filters, provider })}
               style={[styles.chip, (filters.provider ?? 'all') === provider && styles.chipActive]}
             >
               <Text style={[styles.chipText, (filters.provider ?? 'all') === provider && styles.chipTextActive]}>
-                {provider === 'all' ? 'All' : provider === 'youtube' ? 'YouTube' : 'Spotify'}
+                {provider === 'all'
+                  ? 'All'
+                  : provider === 'youtube'
+                    ? 'YouTube'
+                    : provider === 'amazon_music'
+                      ? 'Amazon Music'
+                      : 'Spotify'}
               </Text>
             </Pressable>
           ))}
+          {!amazonLive ? (
+            <Pressable disabled style={[styles.chip, styles.chipDisabled]}>
+              <Text style={styles.chipText}>Amazon Music — Coming Soon</Text>
+            </Pressable>
+          ) : null}
         </View>
         <Text style={styles.filtersLabel}>Filters</Text>
         <FilterBar filters={filters} onChange={setFilters} />
@@ -103,7 +121,7 @@ export function SearchScreen() {
       {!submitted ? (
         <EmptyState
           title="Find a song"
-          body="Connect Spotify or YouTube in Settings, then search. YouTube results come from the official Data API v3."
+          body="Connect Spotify or YouTube in Settings, then search. Amazon Music stays unavailable until Amazon approves official API access."
         />
       ) : null}
     </Screen>
@@ -130,6 +148,7 @@ const styles = StyleSheet.create({
   },
   providerRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
     marginBottom: 12,
   },
@@ -144,6 +163,9 @@ const styles = StyleSheet.create({
   chipActive: {
     backgroundColor: colors.accentMuted,
     borderColor: colors.accent,
+  },
+  chipDisabled: {
+    opacity: 0.6,
   },
   chipText: {
     color: colors.muted,

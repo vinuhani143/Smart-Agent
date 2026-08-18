@@ -18,6 +18,15 @@ export interface ProviderStatus {
   imageUrl?: string | null;
   expiresAt?: string | null;
   unavailableReason?: string | null;
+  accessStatus?:
+    | 'disabled'
+    | 'not_configured'
+    | 'configured'
+    | 'authenticated'
+    | 'api_access_denied'
+    | 'closed_beta';
+  learnMoreUrl?: string | null;
+  subscriptionTier?: string | null;
 }
 
 export interface TrackResult {
@@ -37,6 +46,8 @@ export interface TrackResult {
   parsedArtist?: string;
   youtubeVideoId?: string;
   spotifyId?: string;
+  amazonMusicId?: string;
+  url?: string;
 }
 
 export interface PlaylistSummary {
@@ -73,13 +84,13 @@ export interface SearchFilters {
   yearFrom?: string;
   yearTo?: string;
   duration?: 'any' | 'short' | 'medium' | 'long';
-  provider?: 'all' | 'spotify' | 'youtube';
+  provider?: 'all' | 'spotify' | 'youtube' | 'amazon_music';
 }
 
 export interface GeneratePlaylistPayload {
   prompt: string;
-  provider?: 'spotify' | 'youtube' | 'both';
-  destinationProvider?: 'spotify' | 'youtube';
+  provider?: 'spotify' | 'youtube' | 'amazon_music' | 'both';
+  destinationProvider?: 'spotify' | 'youtube' | 'amazon_music';
   language?: string;
   mood?: string;
   genre?: string;
@@ -106,8 +117,8 @@ export interface PlaylistIntent {
   explicitContent?: boolean;
   energyLevel?: 'low' | 'medium' | 'high';
   tempo?: 'slow' | 'medium' | 'fast';
-  sourceProvider?: 'spotify' | 'youtube' | 'both';
-  destinationProvider?: 'spotify' | 'youtube';
+  sourceProvider?: 'spotify' | 'youtube' | 'amazon_music' | 'both';
+  destinationProvider?: 'spotify' | 'youtube' | 'amazon_music';
 }
 
 export interface GeneratedTrack extends TrackResult {
@@ -138,14 +149,14 @@ export interface PlaylistGenerationView {
     warning: string | null;
     orderingNote: string | null;
     searchQueries: string[];
-    sourceProvider: 'spotify' | 'youtube' | 'both';
-    destinationProvider: 'spotify' | 'youtube' | null;
+    sourceProvider: 'spotify' | 'youtube' | 'amazon_music' | 'both';
+    destinationProvider: 'spotify' | 'youtube' | 'amazon_music' | null;
   };
   status: string;
   confirmationRequired: true;
 }
 
-export type ConvertibleProvider = 'spotify' | 'youtube';
+export type ConvertibleProvider = 'spotify' | 'youtube' | 'amazon_music';
 
 export type ConversionMatchStatus =
   | 'matched'

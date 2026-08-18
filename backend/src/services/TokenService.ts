@@ -62,6 +62,7 @@ export async function saveMusicAccount(input: {
     providerUserId: input.user.id,
     displayName: input.user.displayName,
     imageUrl: input.user.imageUrl ?? null,
+    subscriptionTier: input.user.subscriptionTier ?? null,
   };
 
   return prisma.musicAccount.upsert({

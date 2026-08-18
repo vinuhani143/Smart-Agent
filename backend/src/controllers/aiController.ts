@@ -6,8 +6,8 @@ import type { TrackResult } from '../types/provider';
 
 export const generateAiPlaylistSchema = z.object({
   prompt: z.string().min(3).max(1000),
-  provider: z.enum(['spotify', 'youtube', 'both']).optional(),
-  destinationProvider: z.enum(['spotify', 'youtube']).optional(),
+  provider: z.enum(['spotify', 'youtube', 'amazon_music', 'both']).optional(),
+  destinationProvider: z.enum(['spotify', 'youtube', 'amazon_music']).optional(),
   language: z.string().max(80).optional(),
   mood: z.string().max(80).optional(),
   genre: z.string().max(80).optional(),
@@ -43,12 +43,13 @@ export const updateAiPlaylistSchema = z.object({
       parsedArtist: z.string().optional(),
       youtubeVideoId: z.string().optional(),
       spotifyId: z.string().optional(),
+      amazonMusicId: z.string().optional(),
     })
     .optional(),
 });
 
 export const createAiPlaylistSchema = z.object({
-  destinationProvider: z.enum(['spotify', 'youtube']).optional(),
+  destinationProvider: z.enum(['spotify', 'youtube', 'amazon_music']).optional(),
 });
 
 export const replaceAiTrackSchema = z.object({
@@ -126,7 +127,11 @@ export async function createAiPlaylist(req: Request, res: Response): Promise<voi
 export async function generatePlaylist(req: Request, res: Response): Promise<void> {
   const body = legacyGeneratePlaylistSchema.parse(req.body);
   const destination =
-    body.targetProvider === 'spotify' || body.targetProvider === 'youtube' ? body.targetProvider : undefined;
+    body.targetProvider === 'spotify' ||
+    body.targetProvider === 'youtube' ||
+    body.targetProvider === 'amazon_music'
+      ? body.targetProvider
+      : undefined;
   const view = await PlaylistGeneratorService.generate(req.userId!, {
     prompt: promptFromLegacy(body),
     language: body.language,
@@ -162,13 +167,15 @@ export async function generatePlaylist(req: Request, res: Response): Promise<voi
   });
 }
 
+function asDestination(value: unknown): 'spotify' | 'youtube' | 'amazon_music' | undefined {
+  if (value === 'spotify' || value === 'youtube' || value === 'amazon_music') {
+    return value;
+  }
+  return undefined;
+}
+
 export async function confirmGeneratedPlaylist(req: Request, res: Response): Promise<void> {
-  const destination =
-    req.body?.destinationProvider === 'spotify' || req.body?.destinationProvider === 'youtube'
-      ? req.body.destinationProvider
-      : req.body?.targetProvider === 'spotify' || req.body?.targetProvider === 'youtube'
-        ? req.body.targetProvider
-        : undefined;
+  const destination = asDestination(req.body?.destinationProvider) ?? asDestination(req.body?.targetProvider);
   const result = await PlaylistGeneratorService.createOnProvider(
     req.userId!,
     String(req.params.requestId),

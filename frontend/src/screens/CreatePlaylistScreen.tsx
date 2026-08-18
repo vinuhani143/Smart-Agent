@@ -5,12 +5,13 @@ import { router } from 'expo-router';
 import { ErrorBanner } from '@/components/ErrorBanner';
 import { Screen } from '@/components/Screen';
 import { colors } from '@/constants/theme';
+import { isAmazonMusicLive, providerDisplayName } from '@/constants/providers';
 import { useCreatePlaylist } from '@/hooks/usePlaylists';
 import { useProviders } from '@/hooks/useProviders';
 import type { ProviderId } from '@/types';
 import { toUserMessage } from '@/utils/errors';
 
-const PROVIDERS: ProviderId[] = ['spotify', 'youtube'];
+const PROVIDERS: ProviderId[] = ['spotify', 'youtube', 'amazon_music'];
 
 export function CreatePlaylistScreen() {
   const [name, setName] = useState('');
@@ -24,6 +25,7 @@ export function CreatePlaylistScreen() {
   const [provider, setProvider] = useState<ProviderId>('spotify');
   const create = useCreatePlaylist();
   const providers = useProviders();
+  const amazonLive = isAmazonMusicLive(providers.data?.providers);
   const selected = providers.data?.providers.find((item) => item.id === provider);
 
   return (
@@ -66,16 +68,24 @@ export function CreatePlaylistScreen() {
 
       <Text style={styles.section}>Provider selection</Text>
       <View style={styles.row}>
-        {PROVIDERS.map((id) => (
-          <Button
-            key={id}
-            mode={provider === id ? 'contained' : 'outlined'}
-            onPress={() => setProvider(id)}
-            compact
-          >
-        {id === 'youtube' ? 'YouTube' : 'Spotify'}
-          </Button>
-        ))}
+        {PROVIDERS.map((id) => {
+          const disabled = id === 'amazon_music' && !amazonLive;
+          return (
+            <Button
+              key={id}
+              mode={provider === id ? 'contained' : 'outlined'}
+              onPress={() => {
+                if (!disabled) {
+                  setProvider(id);
+                }
+              }}
+              disabled={disabled}
+              compact
+            >
+              {disabled ? 'Amazon Music — Coming Soon' : providerDisplayName(id)}
+            </Button>
+          );
+        })}
       </View>
       {selected && !selected.connected ? (
         <ErrorBanner message={`Connect ${selected.name} in Settings before creating a playlist there.`} />

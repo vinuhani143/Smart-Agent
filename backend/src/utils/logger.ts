@@ -1,6 +1,6 @@
 type LogLevel = 'info' | 'warn' | 'error';
 
-const SECRET_KEYS = /token|secret|password|authorization|cookie|key/i;
+const SECRET_KEYS = /token|secret|password|authorization|cookie|key|refresh|bearer|client_id|client_secret|x-api-key|securityprofile/i;
 
 function redact(value: unknown): unknown {
   if (typeof value === 'string') {

@@ -63,7 +63,8 @@ export function scoreTrack(track: TrackResult, intent: PlaylistIntent, queryTerm
     : 50;
 
   const metadataConfidence = [languageKnown, genreKnown, moodKnown, yearFlag === 'known'].filter(Boolean).length * 25;
-  const providerAvailability = track.provider === 'spotify' || track.provider === 'youtube' ? 100 : 0;
+  const providerAvailability =
+    track.provider === 'spotify' || track.provider === 'youtube' || track.provider === 'amazon_music' ? 100 : 0;
 
   const trackScore = clamp(
     languageMatch * 0.18 +

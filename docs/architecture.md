@@ -50,7 +50,7 @@ Security controls:
 PostgreSQL via Prisma (`prisma/schema.prisma`):
 
 - `User` — MusicMix account (anonymous session on first launch)
-- `MusicAccount` — connected provider; `accessToken` / `refreshToken` are ciphertext
+- `MusicAccount` — connected provider; `accessToken` / `refreshToken` are ciphertext; `subscriptionTier` only when Amazon returns it
 - `Track` — cross-platform ids (`isrc`, `spotifyId`, `youtubeVideoId`, `amazonMusicId`)
 - `Playlist` / `PlaylistTrack` — server-side playlist definition (`position` preserved)
 - `PlaylistGenerationRequest` — legacy generation job
@@ -68,20 +68,22 @@ PostgreSQL via Prisma (`prisma/schema.prisma`):
 | --- | --- |
 | `SpotifyProvider` | Official Spotify Web API + Authorization Code with PKCE (verifier stored on the server) |
 | `YouTubeProvider` | Official Google OAuth + YouTube Data API v3 (`youtube` scope only). Channel id is `providerUserId`. |
-| `AmazonMusicProvider` | Placeholder. Throws `PROVIDER_UNAVAILABLE` until official API access is configured |
+| `AmazonMusicProvider` | Official Amazon Music Web API + Login With Amazon. **Disabled** unless `AMAZON_MUSIC_ENABLED=true` and LWA + Security Profile credentials are configured. Closed beta; no unofficial clients. |
 
 `ProviderRegistry` is the only place callers look up an adapter.
 
 ## OAuth
 
 1. App creates a MusicMix session (`POST /api/auth/session`) and stores the JWT in SecureStore.
-2. App calls `POST /api/auth/spotify/start` or `POST /api/auth/google/start`.
+2. App calls `POST /api/auth/spotify/start`, `POST /api/auth/google/start`, or `POST /api/auth/amazon/start`.
 3. Backend generates `state` + PKCE verifier, persists them, returns the official authorize URL.
 4. App opens the URL with `expo-web-browser`.
 5. Provider redirects to the **backend** callback.
 6. Backend exchanges the code (client secret stays on the server), encrypts tokens, redirects to `musicmix://auth/callback`.
 
 If credentials are missing, the adapter reports `enabled: false` instead of faking success.
+
+Amazon Music Web API access is subject to Amazon approval. The application does not bypass or work around Amazon's access restrictions. Playlist remove/reorder uses Amazon **entry IDs**, not catalog track IDs.
 
 ## Track matching
 
@@ -107,8 +109,8 @@ YouTube search titles are parsed before matching (`Artist - Song`, `Song | Artis
 
 Flow (frontend `/convert`):
 
-1. Choose source (Spotify or YouTube) and a provider playlist
-2. Choose destination (the other service, unless the user opts into duplicating on the same service)
+1. Choose source (Spotify, YouTube, or Amazon Music when enabled) and a provider playlist
+2. Choose destination (another enabled service, unless the user opts into duplicating on the same service)
 3. **Find Matching Songs** → `POST /api/conversions/analyze` (does **not** create a destination playlist)
 4. Review: accept, choose alternative, skip, or search manually
 5. Summary of matched / review / not found / duplicates
@@ -130,7 +132,7 @@ User request → parse intent (LLM, grounded in the prompt) → validate → sea
 
 `ConfigurableLlmProvider` implements `AIProvider` (`parsePlaylistRequest`, `rankTracks`, `generatePlaylistDescription`) using `AI_PROVIDER` / `AI_API_KEY` / `AI_MODEL`. Missing credentials throw `AI_UNAVAILABLE`. There is no regex-only silent fallback that pretends to be the LLM.
 
-Search stays inside `SpotifyProvider` / `YouTubeProvider` via `SearchService`. Up to **six** queries run with concurrency **2**. Empty queries are skipped; expired OAuth fails the job; YouTube quota and rate limits surface as user-safe errors if no tracks were found.
+Search stays inside `SpotifyProvider` / `YouTubeProvider` / `AmazonMusicProvider` via `SearchService`. Up to **six** queries run with concurrency **2**. Empty queries are skipped; expired OAuth fails the job; YouTube quota, Amazon unavailability, and rate limits surface as user-safe errors if no tracks were found. Amazon-only failures do not fail generation when Spotify or YouTube still return songs.
 
 Track scores are 0–100 from evidence only (`languageMatch`, `genreMatch`, `moodMatch`, `yearMatch`, `artistMatch`, `metadataConfidence`, `providerAvailability`). Language/genre/mood/energy/tempo stay `unknown` unless the catalog text actually contains those terms. MusicMix never invents BPM or a “perfect match.”
 

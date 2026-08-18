@@ -6,14 +6,18 @@ import { ApiClientError } from '@/utils/errors';
 
 WebBrowser.maybeCompleteAuthSession();
 
-export async function connectProvider(kind: 'spotify' | 'google'): Promise<'success' | 'cancel'> {
+export async function connectProvider(kind: 'spotify' | 'google' | 'amazon'): Promise<'success' | 'cancel'> {
   const { authorizationUrl } = await apiFetch<{ authorizationUrl: string }>(`/api/auth/${kind}/start`, {
     method: 'POST',
   });
   const result = await WebBrowser.openAuthSessionAsync(authorizationUrl, OAUTH_REDIRECT);
   if (result.type === 'cancel' || result.type === 'dismiss') {
     throw new ApiClientError(
-      kind === 'google' ? 'YouTube connection was cancelled.' : 'Spotify connection was cancelled.',
+      kind === 'google'
+        ? 'YouTube connection was cancelled.'
+        : kind === 'amazon'
+          ? 'Amazon Music connection was cancelled.'
+          : 'Spotify connection was cancelled.',
       400,
       'OAUTH_CANCELLED',
     );
@@ -41,6 +45,11 @@ export async function connectProvider(kind: 'spotify' | 'google'): Promise<'succ
 }
 
 export async function disconnectProvider(provider: ProviderId): Promise<void> {
-  const path = provider === 'youtube' ? '/api/auth/google/disconnect' : `/api/auth/${provider}/disconnect`;
+  const path =
+    provider === 'youtube'
+      ? '/api/auth/google/disconnect'
+      : provider === 'amazon_music'
+        ? '/api/auth/amazon/disconnect'
+        : `/api/auth/${provider}/disconnect`;
   await apiFetch(path, { method: 'POST' });
 }

@@ -16,6 +16,7 @@ import {
   type ConversionDecision,
 } from '@/hooks/useConversion';
 import { useProviders } from '@/hooks/useProviders';
+import { isAmazonMusicLive, providerDisplayName } from '@/constants/providers';
 import type {
   ConversionMatch,
   ConversionMatchStatus,
@@ -26,10 +27,17 @@ import type {
 import { toUserMessage } from '@/utils/errors';
 
 type Phase = 'setup' | 'review' | 'summary' | 'done';
-const CONVERTIBLE: ConvertibleProvider[] = ['spotify', 'youtube'];
+const CONVERTIBLE: ConvertibleProvider[] = ['spotify', 'youtube', 'amazon_music'];
 
-function labelFor(provider: ConvertibleProvider): string {
-  return provider === 'youtube' ? 'YouTube' : 'Spotify';
+function fallbackDestination(
+  current: ConvertibleProvider,
+  selectable: ConvertibleProvider[],
+): ConvertibleProvider {
+  const other = selectable.find((id) => id !== current);
+  if (other) {
+    return other;
+  }
+  return current === 'spotify' ? 'youtube' : 'spotify';
 }
 
 function statusGlyph(status: ConversionMatchStatus, confidence: number): { mark: string; color: string; label: string } {
@@ -71,6 +79,19 @@ export function ConvertPlaylistScreen() {
 
   const connected = (id: ConvertibleProvider): boolean =>
     Boolean(providers.data?.providers.find((item) => item.id === id)?.connected);
+
+  const amazonLive = isAmazonMusicLive(providers.data?.providers);
+
+  const comingSoon = (id: ConvertibleProvider): boolean => id === 'amazon_music' && !amazonLive;
+
+  const selectable = (id: ConvertibleProvider): boolean => {
+    if (comingSoon(id)) {
+      return false;
+    }
+    return connected(id);
+  };
+
+  const selectableIds = CONVERTIBLE.filter((id) => selectable(id));
 
   const sameService = sourceProvider === destinationProvider;
 
@@ -192,17 +213,18 @@ export function ConvertPlaylistScreen() {
               <Button
                 key={id}
                 mode={sourceProvider === id ? 'contained' : 'outlined'}
-                disabled={!connected(id)}
+                disabled={!selectable(id)}
                 onPress={() => {
                   setSourceProvider(id);
                   setSourcePlaylistId(undefined);
                   if (!allowSameProvider && destinationProvider === id) {
-                    setDestinationProvider(id === 'spotify' ? 'youtube' : 'spotify');
+                    setDestinationProvider(fallbackDestination(id, selectableIds));
                   }
                 }}
               >
-                {labelFor(id)}
-                {!connected(id) ? ' (connect)' : ''}
+                {comingSoon(id)
+                  ? 'Amazon Music — Coming Soon'
+                  : `${providerDisplayName(id)}${!connected(id) ? ' (connect)' : ''}`}
               </Button>
             ))}
           </View>
@@ -221,7 +243,7 @@ export function ConvertPlaylistScreen() {
             </Button>
           ))}
           {remote.isSuccess && (remote.data?.playlists.length ?? 0) === 0 ? (
-            <EmptyState title="No playlists" body={`No ${labelFor(sourceProvider)} playlists were returned.`} />
+            <EmptyState title="No playlists" body={`No ${providerDisplayName(sourceProvider)} playlists were returned.`} />
           ) : null}
 
           <Text style={styles.step}>Step 3: Select Destination</Text>
@@ -230,10 +252,10 @@ export function ConvertPlaylistScreen() {
               <Button
                 key={id}
                 mode={destinationProvider === id ? 'contained' : 'outlined'}
-                disabled={!connected(id) || (id === sourceProvider && !allowSameProvider)}
+                disabled={!selectable(id) || (id === sourceProvider && !allowSameProvider)}
                 onPress={() => setDestinationProvider(id)}
               >
-                {labelFor(id)}
+                {comingSoon(id) ? 'Amazon Music — Coming Soon' : providerDisplayName(id)}
               </Button>
             ))}
           </View>
@@ -243,7 +265,7 @@ export function ConvertPlaylistScreen() {
             </Text>
           </Pressable>
           {sameService && !allowSameProvider ? (
-            <Text style={styles.hint}>Spotify → Spotify and YouTube → YouTube are blocked unless you duplicate.</Text>
+            <Text style={styles.hint}>Same-service copies are blocked unless you duplicate.</Text>
           ) : null}
 
           <Text style={styles.step}>Step 4: Analyze Playlist</Text>

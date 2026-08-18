@@ -56,3 +56,42 @@ describe('TrackMatcher Spotify → YouTube', () => {
     assert.equal(score.needsReview, true);
   });
 });
+
+describe('TrackMatcher Amazon Music', () => {
+  function amazonTrack(title: string, artist: string, isrc?: string): TrackResult {
+    return {
+      provider: 'amazon_music',
+      providerTrackId: 'B0AMAZON1',
+      amazonMusicId: 'B0AMAZON1',
+      title,
+      artist,
+      album: 'Album Title',
+      isrc,
+    };
+  }
+
+  it('matches Spotify and Amazon Music by ISRC', () => {
+    const source = spotifyTrack('Song Title', 'Artist Name', 'USABC1234567');
+    const candidate = amazonTrack('Different Display Title', 'Someone Else', 'US-ABC-12-34567');
+    const score = scoreMatch(source, candidate);
+    assert.equal(score.confidence, 99);
+    assert.equal(score.reason, 'ISRC match');
+    assert.equal(score.needsReview, false);
+  });
+
+  it('matches exact normalized title + artist across Amazon and Spotify', () => {
+    const source = amazonTrack('Song Title', 'Artist Name');
+    const candidate = spotifyTrack('Song Title', 'Artist Name');
+    const score = scoreMatch(source, candidate);
+    assert.equal(score.reason, 'Exact title + artist');
+    assert.ok(score.confidence >= 90);
+  });
+
+  it('never auto-accepts a low-confidence Amazon fuzzy match', () => {
+    const source = spotifyTrack('Midnight Rain', 'Taylor Swift');
+    const candidate = amazonTrack('Cooking Playlist', 'White Noise');
+    const score = scoreMatch(source, candidate);
+    assert.ok(score.confidence < 90);
+    assert.equal(score.needsReview, true);
+  });
+});

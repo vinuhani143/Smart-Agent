@@ -63,7 +63,7 @@ export function PlaylistDetailScreen() {
             >
               Add Songs
             </Button>
-            <Button mode="outlined" onPress={() => router.push('/playlist/convert')}>
+            <Button mode="outlined" onPress={() => router.push('/convert')}>
               Convert
             </Button>
             <Button

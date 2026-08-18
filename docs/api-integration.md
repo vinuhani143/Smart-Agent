@@ -118,12 +118,58 @@ When Amazon access exists, set:
 | `POST` | `/api/playlists/:id/tracks` | Add a track |
 | `DELETE` | `/api/playlists/:id/tracks/:trackId` | Remove a track |
 | `POST` | `/api/playlists/:id/create-on-provider` | Materialize on Spotify/YouTube |
-| `POST` | `/api/playlists/convert` | Match preview (no create) |
+| `POST` | `/api/playlists/convert` | Legacy match preview (no create) |
+| `POST` | `/api/conversions/analyze` | Load source playlist, match tracks, persist job (no destination create) |
+| `GET` | `/api/conversions/:id` | Conversion job + match results + summary |
+| `POST` | `/api/conversions/:id/confirm` | Save accept / skip / alternative / manual decisions |
+| `POST` | `/api/conversions/:id/create` | Create destination playlist from confirmed matches only |
 | `POST` | `/api/ai/generate-playlist` | Candidate tracks only |
 | `POST` | `/api/ai/generate-playlist/:requestId/confirm` | Save after user review |
 
+## Cross-platform playlist conversion
+
+Supported pairs: **Spotify → YouTube** and **YouTube → Spotify**. Same-service copies (`Spotify → Spotify`, `YouTube → YouTube`) return HTTP 409 unless `allowSameProvider: true` (explicit duplicate).
+
+Amazon Music is not a conversion source or destination.
+
+### Matching algorithm
+
+For each source track, MusicMix searches the destination with official APIs (never audio download):
+
+1. ISRC (when both sides have it)
+2. Exact normalized title + artist
+3. Normalized title + artist (high similarity)
+4. Album + artist
+5. Fuzzy title + artist (Levenshtein, last resort)
+
+Spotify → YouTube search queries, in order, stopping early on a high-confidence hit:
+
+- `artist + title`
+- `title + artist`
+- `artist + title + album`
+
+YouTube → Spotify uses the parsed title + artist. If YouTube metadata confidence is below 90, the match is `needs_review` even when a candidate looks strong, and the UI shows the original video title.
+
+### Confidence
+
+| Score | Band | Auto-select? |
+| --- | --- | --- |
+| 90–100 | High | Yes (`matched`) |
+| 75–89 | Medium | No (`needs_review`) |
+| 0–74 | Low | No (`needs_review` or `not_found`) |
+
+Manual search saves `matchMethod = "manual"` and `confidence = 100`.
+
+Duplicates (same destination provider id, ISRC, or normalized title+artist) keep the highest-confidence row; others are `duplicate`.
+
+### Rate limiting and quota
+
+Track matching runs with **concurrency 3**. Each search retries transient `429` / network failures with exponential backoff (`400ms × 2^attempt`, honors `Retry-After`, max 3 attempts). **YouTube `quotaExceeded` is never retried.** Remaining tracks are left unmatched if quota is already exhausted on a later query; the first quota failure with no candidates fails the analyze call.
+
+If destination playlist creation fails part-way, MusicMix stores `destinationPlaylistId` and returns *“Playlist created with X of Y tracks.”* Retrying `POST /create` adds remaining tracks to the **same** playlist and does not create a second one.
+
 ## Errors the client can show
 
-Human-readable messages are mapped for: OAuth failure, OAuth cancellation, expired/invalid token, refresh failure, YouTube quota exceeded, 403 permission errors, 404/private/deleted videos, rate limit, network error, no search results, duplicate track, track unavailable on destination, insufficient permissions, provider unavailable, reorder not supported.
+Human-readable messages are mapped for: OAuth failure, OAuth cancellation, expired/invalid token, refresh failure, YouTube quota exceeded, 403 permission errors, 404/private/deleted videos, rate limit, network error, no search results, duplicate track, track unavailable on destination, insufficient permissions, provider unavailable, reorder not supported, source playlist unavailable, conversion not confirmed, partial playlist creation.
 
 Responses never include client secrets, refresh tokens, access tokens, or `DATABASE_URL`.

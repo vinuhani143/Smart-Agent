@@ -15,9 +15,10 @@ The client never receives Spotify/Google access tokens or refresh tokens. OAuth 
 Routes:
 
 - `app/(tabs)` — Home, Search, Playlists, Create, Settings
+- `app/convert` — cross-provider conversion wizard (source → match review → summary → create)
 - `app/playlist/[id]` — playlist detail (Play / Add / Convert / Delete)
 - `app/playlist/ai` — generation preview (create only after confirm)
-- `app/playlist/convert` — cross-provider match preview
+- `app/playlist/convert` — same conversion wizard (compat route)
 - `app/auth/callback` — OAuth deep-link landing
 
 Reusable UI lives in `frontend/src/components`. Screens live in `frontend/src/screens` and are mounted by thin route files.
@@ -51,6 +52,7 @@ PostgreSQL via Prisma (`prisma/schema.prisma`):
 - `Track` — cross-platform ids (`isrc`, `spotifyId`, `youtubeVideoId`, `amazonMusicId`)
 - `Playlist` / `PlaylistTrack` — server-side playlist definition (`position` preserved)
 - `PlaylistGenerationRequest` — generation job; status stays `GENERATED` until the user confirms
+- `PlaylistConversion` / `ConversionTrack` — cross-provider conversion job and per-track decisions
 - `OAuthState` — CSRF state + PKCE verifier, short-lived
 
 ## Provider adapters
@@ -88,11 +90,30 @@ If credentials are missing, the adapter reports `enabled: false` instead of faki
 4. Album + artist
 5. Fuzzy (Levenshtein) title + artist
 
-Normalization lowercases, strips punctuation, collapses spaces, and removes `feat.` / `featuring`, `official audio`, `lyrics`, `remastered`, `live`, `remix`.
+Normalization lowercases, strips punctuation and bracketed marketing text (`official audio`, `lyrics`, `remastered`, `live`, `acoustic`, `radio edit`, `extended mix`, `feat`/`ft`/`featuring`), and collapses spaces. Meaningful title words are kept (for example “Version of Me” is not stripped down to “of me”). Original source metadata is never mutated.
 
-Confidence is 0–100. Below 80, `needsReview` is true and alternatives are returned. MusicMix does not auto-select a weak match.
+Confidence is 0–100:
 
-YouTube search titles are parsed before matching (`Artist - Song`, `Song | Artist`, official-video noise). The Convert screen shows alternatives when confidence is low.
+- **90–100** high — may auto-include as `matched`
+- **75–89** medium — `needs_review`, never silent-select
+- **0–74** low — `needs_review` or `not_found`
+
+YouTube search titles are parsed before matching (`Artist - Song`, `Song | Artist`, official-video noise). Low YouTube parse confidence forces review and shows the original video title.
+
+## Playlist conversion
+
+Flow (frontend `/convert`):
+
+1. Choose source (Spotify or YouTube) and a provider playlist
+2. Choose destination (the other service, unless the user opts into duplicating on the same service)
+3. **Find Matching Songs** → `POST /api/conversions/analyze` (does **not** create a destination playlist)
+4. Review: accept, choose alternative, skip, or search manually
+5. Summary of matched / review / not found / duplicates
+6. **Create Playlist** → `POST /api/conversions/:id/confirm` then `POST /api/conversions/:id/create`
+
+Only accepted, high-confidence, and manual matches are added. Skipped, unresolved, duplicate, and low-confidence unapproved rows are omitted.
+
+Matching searches run with concurrency 3 and retry only transient rate-limit/network errors. YouTube quota exceeded is never retried.
 
 ## YouTube playlist reorder
 

@@ -148,6 +148,17 @@ Or a release APK after `eas build` / local Gradle assemble. Set `EXPO_PUBLIC_API
 
 Amazon Music remains disabled until Amazon grants official API credentials. Do not invent keys.
 
+## Convert a playlist
+
+1. Connect **both** Spotify and YouTube in Settings.
+2. Open **Convert Playlist** (`/convert`).
+3. Pick a source service and one of that account’s playlists, then the other service as destination.
+4. Tap **Find Matching Songs**. Nothing is created on the destination yet.
+5. Accept, skip, pick an alternative, or search manually. Low-confidence rows are never chosen for you.
+6. Review the summary, then tap **Create Playlist**.
+
+Same-service copies are blocked unless you check **Duplicate this playlist on the same service**.
+
 ## Typecheck
 
 ```bash

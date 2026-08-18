@@ -27,6 +27,24 @@ enum GenerationStatus {
   FAILED
 }
 
+enum ConversionStatus {
+  ANALYZED
+  CONFIRMED
+  CREATED
+  PARTIAL
+  FAILED
+}
+
+enum ConversionTrackStatus {
+  MATCHED
+  NEEDS_REVIEW
+  NOT_FOUND
+  ACCEPTED
+  SKIPPED
+  MANUAL
+  DUPLICATE
+}
+
 model User {
   id                  String                       @id @default(cuid())
   email               String?                      @unique
@@ -36,6 +54,7 @@ model User {
   musicAccounts       MusicAccount[]
   playlists           Playlist[]
   generationRequests  PlaylistGenerationRequest[]
+  conversions         PlaylistConversion[]
   oauthStates         OAuthState[]
 }
 
@@ -155,4 +174,52 @@ model OAuthState {
   user         User              @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([expiresAt])
+}
+
+/// Cross-provider playlist conversion job. The destination playlist is never
+/// created on a provider until the user confirms selected matches.
+model PlaylistConversion {
+  id                        String             @id @default(cuid())
+  userId                    String
+  sourceProvider            MusicProviderName
+  sourcePlaylistId          String
+  sourcePlaylistName        String?
+  sourcePlaylistDescription String?
+  destinationProvider       MusicProviderName
+  destinationPlaylistId     String?
+  localPlaylistId           String?
+  status                    ConversionStatus   @default(ANALYZED)
+  totalTracks               Int                @default(0)
+  matchedTracks             Int                @default(0)
+  reviewTracks              Int                @default(0)
+  notFoundTracks            Int                @default(0)
+  duplicateTracks           Int                @default(0)
+  addedTracks               Int                @default(0)
+  errorMessage              String?
+  createdAt                 DateTime           @default(now())
+  completedAt               DateTime?
+  updatedAt                 DateTime           @updatedAt
+  user                      User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tracks                    ConversionTrack[]
+
+  @@index([userId, createdAt])
+}
+
+model ConversionTrack {
+  id                   String                @id @default(cuid())
+  conversionId         String
+  sourceTrackId        String
+  destinationTrackId   String?
+  confidence           Int                   @default(0)
+  matchMethod          String?
+  status               ConversionTrackStatus
+  sourceSnapshot       Json
+  destinationSnapshot  Json?
+  alternativesSnapshot Json?
+  addedToDestination   Boolean               @default(false)
+  errorMessage         String?
+  position             Int
+  conversion           PlaylistConversion    @relation(fields: [conversionId], references: [id], onDelete: Cascade)
+
+  @@index([conversionId, position])
 }

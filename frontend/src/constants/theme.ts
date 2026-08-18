@@ -13,6 +13,7 @@ export const colors = {
   cyan: '#22D3EE',
   danger: '#FB7185',
   success: '#34D399',
+  warning: '#FBBF24',
   spotify: '#1DB954',
   youtube: '#FF0000',
   amazon: '#FF9900',

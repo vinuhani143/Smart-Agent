@@ -61,8 +61,9 @@ export default function RootLayout() {
             }}
           >
             <Stack.Screen name="(tabs)" />
+            <Stack.Screen name="convert" options={{ headerShown: true, title: 'Convert Playlist', headerTintColor: '#F4F4F5', headerStyle: { backgroundColor: '#0B0B10' } }} />
             <Stack.Screen name="playlist/ai" options={{ headerShown: true, title: 'AI Playlist', headerTintColor: '#F4F4F5', headerStyle: { backgroundColor: '#0B0B10' } }} />
-            <Stack.Screen name="playlist/convert" options={{ headerShown: true, title: 'Convert', headerTintColor: '#F4F4F5', headerStyle: { backgroundColor: '#0B0B10' } }} />
+            <Stack.Screen name="playlist/convert" options={{ headerShown: true, title: 'Convert Playlist', headerTintColor: '#F4F4F5', headerStyle: { backgroundColor: '#0B0B10' } }} />
             <Stack.Screen name="playlist/[id]" options={{ headerShown: true, title: 'Playlist', headerTintColor: '#F4F4F5', headerStyle: { backgroundColor: '#0B0B10' } }} />
             <Stack.Screen name="auth/callback" />
           </Stack>

@@ -3,12 +3,29 @@ import { normalizeTrackIdentity } from '../utils/normalize';
 import type { TrackResult } from '../types/provider';
 import { parseYouTubeTitle } from '../providers/youtube/parseYouTubeTitle';
 
-export const LOW_CONFIDENCE_THRESHOLD = 80;
+/** Auto-select only at or above this score. Medium (75–89) still needs review. */
+export const HIGH_CONFIDENCE_THRESHOLD = 90;
+export const MEDIUM_CONFIDENCE_THRESHOLD = 75;
+/** @deprecated Use HIGH_CONFIDENCE_THRESHOLD. Kept so existing callers still compile. */
+export const LOW_CONFIDENCE_THRESHOLD = HIGH_CONFIDENCE_THRESHOLD;
+
+export type MatchMethod =
+  | 'isrc'
+  | 'exact_title_artist'
+  | 'normalized_title_artist'
+  | 'album_artist'
+  | 'fuzzy'
+  | 'provider_id'
+  | 'manual';
+
+export type MatchStatus = 'matched' | 'needs_review' | 'not_found';
+export type ConfidenceBand = 'high' | 'medium' | 'low';
 
 export interface MatchScore {
   track: TrackResult;
   confidence: number;
   reason: string;
+  matchMethod: MatchMethod;
   needsReview: boolean;
 }
 
@@ -16,6 +33,8 @@ export interface MatchDecision {
   source: TrackResult;
   best: MatchScore | null;
   alternatives: MatchScore[];
+  status: MatchStatus;
+  matchMethod?: MatchMethod;
 }
 
 interface Identity {
@@ -25,7 +44,7 @@ interface Identity {
   strippedRemixOrLive: boolean;
 }
 
-function isrcEqual(a?: string, b?: string): boolean {
+export function isrcEqual(a?: string, b?: string): boolean {
   if (!a || !b) {
     return false;
   }
@@ -46,6 +65,35 @@ function clampConfidence(value: number): number {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
 
+export function confidenceBand(confidence: number): ConfidenceBand {
+  if (confidence >= HIGH_CONFIDENCE_THRESHOLD) {
+    return 'high';
+  }
+  if (confidence >= MEDIUM_CONFIDENCE_THRESHOLD) {
+    return 'medium';
+  }
+  return 'low';
+}
+
+export function methodFromReason(reason: string): MatchMethod {
+  if (reason === 'ISRC match') {
+    return 'isrc';
+  }
+  if (reason === 'Exact title + artist') {
+    return 'exact_title_artist';
+  }
+  if (reason === 'Normalized title + artist') {
+    return 'normalized_title_artist';
+  }
+  if (reason === 'Album + artist') {
+    return 'album_artist';
+  }
+  if (reason === 'Same provider track id') {
+    return 'provider_id';
+  }
+  return 'fuzzy';
+}
+
 function identitiesFor(track: TrackResult): Identity[] {
   const primary = normalizeTrackIdentity(
     track.parsedTitle ?? track.title,
@@ -55,11 +103,15 @@ function identitiesFor(track: TrackResult): Identity[] {
   const list: Identity[] = [primary];
   if (track.originalTitle && track.originalTitle !== track.title) {
     const parsed = parseYouTubeTitle(track.originalTitle, track.artist);
-    list.push(normalizeTrackIdentity(parsed.parsedTitle ?? parsed.title, parsed.parsedArtist ?? parsed.artist));
+    list.push(
+      normalizeTrackIdentity(parsed.parsedTitle ?? parsed.title, parsed.parsedArtist ?? parsed.artist, track.album),
+    );
   }
   if (track.provider === 'youtube') {
     const parsed = parseYouTubeTitle(track.originalTitle ?? track.title, track.artist);
-    list.push(normalizeTrackIdentity(parsed.parsedTitle ?? parsed.title, parsed.parsedArtist ?? parsed.artist));
+    list.push(
+      normalizeTrackIdentity(parsed.parsedTitle ?? parsed.title, parsed.parsedArtist ?? parsed.artist, track.album),
+    );
   }
   return list;
 }
@@ -99,6 +151,7 @@ export function scoreMatch(source: TrackResult, candidate: TrackResult): MatchSc
       track: candidate,
       confidence: 100,
       reason: 'Same provider track id',
+      matchMethod: 'provider_id',
       needsReview: false,
     };
   }
@@ -108,6 +161,7 @@ export function scoreMatch(source: TrackResult, candidate: TrackResult): MatchSc
       track: candidate,
       confidence: 99,
       reason: 'ISRC match',
+      matchMethod: 'isrc',
       needsReview: false,
     };
   }
@@ -125,39 +179,59 @@ export function scoreMatch(source: TrackResult, candidate: TrackResult): MatchSc
     }
   }
 
+  const needsReview = best.confidence < HIGH_CONFIDENCE_THRESHOLD;
   return {
     track: candidate,
     confidence: best.confidence,
     reason: best.reason,
-    needsReview: best.confidence < LOW_CONFIDENCE_THRESHOLD,
+    matchMethod: methodFromReason(best.reason),
+    needsReview,
   };
+}
+
+export function decideMatchStatus(
+  best: MatchScore | null,
+  sourceMetadataConfidence?: number,
+): MatchStatus {
+  if (!best || best.confidence <= 0) {
+    return 'not_found';
+  }
+  const lowSourceMetadata =
+    sourceMetadataConfidence !== undefined && sourceMetadataConfidence < HIGH_CONFIDENCE_THRESHOLD;
+  if (lowSourceMetadata || best.confidence < HIGH_CONFIDENCE_THRESHOLD) {
+    return 'needs_review';
+  }
+  return 'matched';
 }
 
 /**
  * Rank destination-provider candidates for a source track.
- * Never auto-selects a low-confidence match — callers must show alternatives.
+ * Never auto-selects a medium or low-confidence match.
  */
 export function matchTrack(source: TrackResult, candidates: TrackResult[]): MatchDecision {
   const ranked = candidates
     .map((candidate) => scoreMatch(source, candidate))
+    .filter((score) => score.confidence > 0)
     .sort((a, b) => b.confidence - a.confidence);
 
   const best = ranked[0] ?? null;
   const alternatives = ranked.slice(1, 5);
+  const status = decideMatchStatus(best, source.metadataConfidence);
 
   if (!best) {
-    return { source, best: null, alternatives: [] };
+    return { source, best: null, alternatives: [], status: 'not_found' };
   }
 
-  if (best.confidence < LOW_CONFIDENCE_THRESHOLD) {
-    return {
-      source,
-      best: { ...best, needsReview: true },
-      alternatives,
-    };
-  }
-
-  return { source, best, alternatives };
+  return {
+    source,
+    best: {
+      ...best,
+      needsReview: status !== 'matched',
+    },
+    alternatives,
+    status,
+    matchMethod: best.matchMethod,
+  };
 }
 
 export class TrackMatcher {

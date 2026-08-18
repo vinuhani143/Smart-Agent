@@ -14,6 +14,7 @@ const config: ExpoConfig = {
   },
   android: {
     package: 'com.musicmix.app',
+    versionCode: 1,
     adaptiveIcon: {
       backgroundColor: '#0B0B10',
       foregroundImage: './assets/images/android-icon-foreground.png',
@@ -21,6 +22,20 @@ const config: ExpoConfig = {
       monochromeImage: './assets/images/android-icon-monochrome.png',
     },
     predictiveBackGestureEnabled: false,
+    softwareKeyboardLayoutMode: 'resize',
+    intentFilters: [
+      {
+        action: 'VIEW',
+        category: ['BROWSABLE', 'DEFAULT'],
+        data: [
+          {
+            scheme: 'musicmix',
+            host: 'auth',
+            pathPrefix: '/callback',
+          },
+        ],
+      },
+    ],
   },
   web: {
     bundler: 'metro',

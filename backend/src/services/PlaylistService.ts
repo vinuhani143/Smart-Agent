@@ -1,9 +1,10 @@
 import { prisma } from '../config/prisma';
-import { DuplicateTrackError, NotFoundError, ProviderUnavailableError } from '../types/errors';
+import { AppError, DuplicateTrackError, ErrorCode, NotFoundError, ProviderUnavailableError } from '../types/errors';
 import type { Track } from '@prisma/client';
 import type { ProviderId, TrackResult } from '../types/provider';
 import { fromPrismaProvider, getProvider, toPrismaProvider } from '../providers/ProviderRegistry';
 import { DuplicateDetector } from './DuplicateDetector';
+import { runRemotePlaylistCreate } from './RemotePlaylistOperations';
 import { upsertTrack } from './SearchService';
 import { requireStoredAccount, withProviderTokens } from './TokenService';
 import { matchTrack } from './TrackMatcher';
@@ -60,10 +61,6 @@ export async function createLocalPlaylist(userId: string, input: CreateLocalPlay
     ? (input.tracks ?? [])
     : new DuplicateDetector().unique(input.tracks ?? []);
 
-  let sourceProvider = input.sourceProvider;
-  let sourcePlaylistId = input.sourcePlaylistId;
-  let coverImageUrl = input.coverImageUrl;
-
   if (input.targetProvider) {
     const targetProvider = input.targetProvider;
     const adapter = getProvider(targetProvider);
@@ -75,40 +72,59 @@ export async function createLocalPlaylist(userId: string, input: CreateLocalPlay
           : `${adapter.displayName} is not configured.`,
       );
     }
-    const remote = await withProviderTokens(userId, targetProvider, async (tokens) => {
-      const created = await adapter.createPlaylist(tokens, {
-        name: input.name,
-        description: input.description,
-      });
-      const remoteIds: string[] = [];
-      for (const track of uniqueTracks) {
-        const nativeId = remoteTrackIdForProvider(targetProvider, track);
-        if (nativeId) {
-          remoteIds.push(nativeId);
-          continue;
-        }
-        const query = `${track.title} ${track.artist}`.trim();
-        if (!query) {
-          continue;
-        }
-        const candidates = await adapter.searchTracks(tokens, { query, limit: 5 });
-        const decision = matchTrack(track, candidates);
-        if (decision.best && !decision.best.needsReview) {
-          remoteIds.push(decision.best.track.providerTrackId);
-        }
-      }
-      if (remoteIds.length > 0) {
-        await adapter.addTracksToPlaylist(tokens, created.providerPlaylistId, remoteIds);
-      }
-      return created;
+    let coverFromRemote = input.coverImageUrl;
+    return runRemotePlaylistCreate({
+      userId,
+      provider: targetProvider,
+      purpose: 'create_playlist',
+      createRemote: async () => {
+        const remote = await withProviderTokens(userId, targetProvider, async (tokens) => {
+          const created = await adapter.createPlaylist(tokens, {
+            name: input.name,
+            description: input.description,
+          });
+          const remoteIds: string[] = [];
+          for (const track of uniqueTracks) {
+            const nativeId = remoteTrackIdForProvider(targetProvider, track);
+            if (nativeId) {
+              remoteIds.push(nativeId);
+              continue;
+            }
+            const query = `${track.title} ${track.artist}`.trim();
+            if (!query) {
+              continue;
+            }
+            const candidates = await adapter.searchTracks(tokens, { query, limit: 5 });
+            const decision = matchTrack(track, candidates);
+            if (decision.best && !decision.best.needsReview) {
+              remoteIds.push(decision.best.track.providerTrackId);
+            }
+          }
+          if (remoteIds.length > 0) {
+            await adapter.addTracksToPlaylist(tokens, created.providerPlaylistId, remoteIds);
+          }
+          return created;
+        });
+        coverFromRemote = remote.coverImageUrl ?? coverFromRemote;
+        return { providerPlaylistId: remote.providerPlaylistId };
+      },
+      persistLocal: (remotePlaylistId) =>
+        persistLocalPlaylist(userId, {
+          ...input,
+          tracks: uniqueTracks,
+          sourceProvider: targetProvider,
+          sourcePlaylistId: remotePlaylistId,
+          coverImageUrl: coverFromRemote,
+        }),
     });
-    sourceProvider = input.targetProvider;
-    sourcePlaylistId = remote.providerPlaylistId;
-    coverImageUrl = remote.coverImageUrl ?? coverImageUrl;
   }
 
+  return persistLocalPlaylist(userId, { ...input, tracks: uniqueTracks });
+}
+
+async function persistLocalPlaylist(userId: string, input: CreateLocalPlaylistInput & { tracks: TrackResult[] }) {
   const trackRows: Track[] = [];
-  for (const result of uniqueTracks) {
+  for (const result of input.tracks) {
     trackRows.push(await upsertTrack(result));
   }
 
@@ -118,9 +134,9 @@ export async function createLocalPlaylist(userId: string, input: CreateLocalPlay
         userId,
         name: input.name,
         description: input.description,
-        coverImageUrl,
-        sourceProvider: sourceProvider ? toPrismaProvider(sourceProvider) : undefined,
-        sourcePlaylistId,
+        coverImageUrl: input.coverImageUrl,
+        sourceProvider: input.sourceProvider ? toPrismaProvider(input.sourceProvider) : undefined,
+        sourcePlaylistId: input.sourcePlaylistId,
         language: input.language,
         genre: input.genre,
         mood: input.mood,
@@ -283,6 +299,39 @@ export async function removeTrackFromPlaylist(userId: string, playlistId: string
   return getPlaylist(userId, playlistId);
 }
 
+export async function reorderPlaylistTracks(userId: string, playlistId: string, orderedTrackIds: string[]) {
+  const playlist = await getPlaylist(userId, playlistId);
+  const currentIds = playlist.tracks.map((item) => item.trackId);
+  if (orderedTrackIds.length !== currentIds.length) {
+    throw new AppError(ErrorCode.VALIDATION_ERROR, 'Send every song in the playlist, each once.', 400);
+  }
+  const unique = new Set(orderedTrackIds);
+  if (unique.size !== orderedTrackIds.length) {
+    throw new AppError(ErrorCode.VALIDATION_ERROR, 'Duplicate song positions are not allowed.', 400);
+  }
+  for (const trackId of orderedTrackIds) {
+    if (!currentIds.includes(trackId)) {
+      throw new AppError(ErrorCode.VALIDATION_ERROR, 'One of those songs is not in this playlist.', 400);
+    }
+  }
+
+  await prisma.$transaction(async (tx) => {
+    for (const [index, trackId] of orderedTrackIds.entries()) {
+      await tx.playlistTrack.update({
+        where: { playlistId_trackId: { playlistId, trackId } },
+        data: { position: -(index + 1) },
+      });
+    }
+    for (const [index, trackId] of orderedTrackIds.entries()) {
+      await tx.playlistTrack.update({
+        where: { playlistId_trackId: { playlistId, trackId } },
+        data: { position: index },
+      });
+    }
+  });
+  return getPlaylist(userId, playlistId);
+}
+
 export async function createPlaylistOnProvider(
   userId: string,
   playlistId: string,
@@ -301,57 +350,70 @@ export async function createPlaylistOnProvider(
   }
   await requireStoredAccount(userId, provider);
 
-  const created = await withProviderTokens(userId, provider, async (tokens) => {
-    const remote = await adapter.createPlaylist(tokens, {
-      name: playlist.name,
-      description: playlist.description ?? undefined,
-    });
-    const chosen = confirmedTrackIds
-      ? playlist.tracks.filter((item) => confirmedTrackIds.includes(item.trackId))
-      : playlist.tracks;
-    const remoteIds: string[] = [];
-    for (const item of chosen) {
-      const providerTrackId =
-        provider === 'spotify'
-          ? item.track.spotifyId
-          : provider === 'youtube'
-            ? item.track.youtubeVideoId
-            : item.track.amazonMusicId;
-      if (providerTrackId) {
-        remoteIds.push(providerTrackId);
-        continue;
-      }
-      const query = `${item.track.title} ${item.track.artist}`;
-      const candidates = await adapter.searchTracks(tokens, { query, limit: 5 });
-      const source: TrackResult = {
-        provider: item.track.spotifyId ? 'spotify' : item.track.youtubeVideoId ? 'youtube' : provider,
-        providerTrackId: item.track.spotifyId ?? item.track.youtubeVideoId ?? item.track.id,
-        title: item.track.title,
-        artist: item.track.artist,
-        album: item.track.album ?? undefined,
-        durationMs: item.track.durationMs ?? undefined,
-        isrc: item.track.isrc ?? undefined,
-        spotifyId: item.track.spotifyId ?? undefined,
-        youtubeVideoId: item.track.youtubeVideoId ?? undefined,
-      };
-      const decision = matchTrack(source, candidates);
-      if (decision.best && !decision.best.needsReview) {
-        remoteIds.push(decision.best.track.providerTrackId);
-      }
-    }
-    if (remoteIds.length > 0) {
-      await adapter.addTracksToPlaylist(tokens, remote.providerPlaylistId, remoteIds);
-    }
-    return { remote, added: remoteIds.length, skipped: chosen.length - remoteIds.length };
-  });
+  let createdPayload:
+    | { remote: { providerPlaylistId: string }; added: number; skipped: number }
+    | undefined;
 
-  await prisma.playlist.update({
-    where: { id: playlistId },
-    data: {
-      sourceProvider: toPrismaProvider(provider),
-      sourcePlaylistId: created.remote.providerPlaylistId,
+  return runRemotePlaylistCreate({
+    userId,
+    provider,
+    purpose: 'create_on_provider',
+    createRemote: async () => {
+      const created = await withProviderTokens(userId, provider, async (tokens) => {
+        const remote = await adapter.createPlaylist(tokens, {
+          name: playlist.name,
+          description: playlist.description ?? undefined,
+        });
+        const chosen = confirmedTrackIds
+          ? playlist.tracks.filter((item) => confirmedTrackIds.includes(item.trackId))
+          : playlist.tracks;
+        const remoteIds: string[] = [];
+        for (const item of chosen) {
+          const providerTrackId =
+            provider === 'spotify'
+              ? item.track.spotifyId
+              : provider === 'youtube'
+                ? item.track.youtubeVideoId
+                : item.track.amazonMusicId;
+          if (providerTrackId) {
+            remoteIds.push(providerTrackId);
+            continue;
+          }
+          const query = `${item.track.title} ${item.track.artist}`;
+          const candidates = await adapter.searchTracks(tokens, { query, limit: 5 });
+          const source: TrackResult = {
+            provider: item.track.spotifyId ? 'spotify' : item.track.youtubeVideoId ? 'youtube' : provider,
+            providerTrackId: item.track.spotifyId ?? item.track.youtubeVideoId ?? item.track.id,
+            title: item.track.title,
+            artist: item.track.artist,
+            album: item.track.album ?? undefined,
+            durationMs: item.track.durationMs ?? undefined,
+            isrc: item.track.isrc ?? undefined,
+            spotifyId: item.track.spotifyId ?? undefined,
+            youtubeVideoId: item.track.youtubeVideoId ?? undefined,
+          };
+          const decision = matchTrack(source, candidates);
+          if (decision.best && !decision.best.needsReview) {
+            remoteIds.push(decision.best.track.providerTrackId);
+          }
+        }
+        if (remoteIds.length > 0) {
+          await adapter.addTracksToPlaylist(tokens, remote.providerPlaylistId, remoteIds);
+        }
+        return { remote, added: remoteIds.length, skipped: chosen.length - remoteIds.length };
+      });
+      createdPayload = created;
+      return { providerPlaylistId: created.remote.providerPlaylistId };
+    },
+    persistLocal: async (remotePlaylistId) => {
+      await prisma.playlist.update({
+        where: { id: playlistId },
+        data: {
+          sourceProvider: toPrismaProvider(provider),
+          sourcePlaylistId: remotePlaylistId,
+        },
+      });
+      return createdPayload!;
     },
   });
-
-  return created;
 }

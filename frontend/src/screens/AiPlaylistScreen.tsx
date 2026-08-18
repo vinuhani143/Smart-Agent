@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Switch } from 'react-native-paper';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -15,6 +15,7 @@ import { Screen } from '@/components/Screen';
 import { TrackRow } from '@/components/TrackRow';
 import { isAmazonMusicLive, isAmazonMusicReady } from '@/constants/providers';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
+import { createIdempotencyGuard } from '@/utils/idempotency';
 import { useProviders } from '@/hooks/useProviders';
 import { useSearch } from '@/hooks/useSearch';
 import { useToast } from '@/components/ToastProvider';
@@ -78,6 +79,7 @@ export function AiPlaylistScreen() {
   const [addQuery, setAddQuery] = useState('');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const createGuard = useRef(createIdempotencyGuard());
   const providers = useProviders();
   const amazonLive = isAmazonMusicLive(providers.data?.providers);
   const amazonReady = isAmazonMusicReady(providers.data?.providers);
@@ -267,10 +269,13 @@ export function AiPlaylistScreen() {
     setError(null);
     try {
       await persist({ title: title.trim() || view.playlist.title, description: description.trim() });
+      const payload = { destinationProvider: destination };
       const result = await apiFetch<{ playlistId: string }>(`/api/ai/playlists/${view.generationId}/create`, {
         method: 'POST',
-        body: JSON.stringify({ destinationProvider: destination }),
+        headers: { 'Idempotency-Key': createGuard.current.keyFor({ generationId: view.generationId, ...payload }) },
+        body: JSON.stringify(payload),
       });
+      createGuard.current.reset();
       toast.show('Playlist created', 'success');
       router.push(`/playlist/${result.playlistId}`);
     } catch (err) {

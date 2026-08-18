@@ -45,6 +45,8 @@ const envSchema = z.object({
   AI_API_KEY: z.string().optional().default(''),
   AI_MODEL: z.string().optional().default(''),
   AI_BASE_URL: z.string().optional().default(''),
+  /** Header secret for POST /api/internal/remote-operations/:id/cleanup. Never send to the app. */
+  INTERNAL_CLEANUP_KEY: z.string().optional().default(''),
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -64,8 +66,23 @@ export function loadEnv(): Env {
     throw new Error(`Invalid environment configuration:\n${issues}`);
   }
 
+  assertProductionSafeUrls(parsed.data);
   cached = parsed.data;
   return cached;
+}
+
+/** Production API origin must be HTTPS and must not be loopback. */
+export function assertProductionSafeUrls(env: Pick<Env, 'NODE_ENV' | 'API_PUBLIC_URL'>): void {
+  if (env.NODE_ENV !== 'production') {
+    return;
+  }
+  const url = env.API_PUBLIC_URL.trim();
+  if (/localhost|127\.0\.0\.1|0\.0\.0\.0|10\.0\.2\.2/i.test(url)) {
+    throw new Error('API_PUBLIC_URL cannot be a loopback address in production.');
+  }
+  if (!url.startsWith('https://')) {
+    throw new Error('API_PUBLIC_URL must be an https URL in production.');
+  }
 }
 
 export function getEnv(): Env {

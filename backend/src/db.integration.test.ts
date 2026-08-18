@@ -5,8 +5,8 @@ process.env.TOKEN_ENCRYPTION_KEY ??= 'ab'.repeat(32);
 import assert from 'node:assert/strict';
 import { after, describe, it } from 'node:test';
 import { prisma } from './config/prisma';
-import { createLocalPlaylist, deletePlaylist, getPlaylist, addTrackToPlaylist, updatePlaylist, removeTrackFromPlaylist } from './services/PlaylistService';
-import { DuplicateTrackError, NotFoundError } from './types/errors';
+import { createLocalPlaylist, deletePlaylist, getPlaylist, addTrackToPlaylist, updatePlaylist, removeTrackFromPlaylist, reorderPlaylistTracks } from './services/PlaylistService';
+import { AppError, DuplicateTrackError, NotFoundError } from './types/errors';
 
 const userIds: string[] = [];
 
@@ -134,5 +134,35 @@ describe('database constraints and playlist operations', () => {
     );
     const leftover = await prisma.playlist.findFirst({ where: { userId: user.id, name: 'Partial' } });
     assert.equal(leftover, null);
+  });
+
+  it('reorders saved playlist tracks in a transaction', async () => {
+    const user = await newUser();
+    const created = await createLocalPlaylist(user.id, {
+      name: 'Reorder me',
+      tracks: [
+        { provider: 'spotify', providerTrackId: 'r1', title: 'One', artist: 'A', spotifyId: 'r1' },
+        { provider: 'spotify', providerTrackId: 'r2', title: 'Two', artist: 'A', spotifyId: 'r2' },
+        { provider: 'spotify', providerTrackId: 'r3', title: 'Three', artist: 'A', spotifyId: 'r3' },
+      ],
+    });
+    const original = created.tracks.map((item) => item.trackId);
+    const reversed = [...original].reverse();
+    const reordered = await reorderPlaylistTracks(user.id, created.id, reversed);
+    assert.deepEqual(reordered.tracks.map((item) => item.trackId), reversed);
+    await assert.rejects(
+      () => reorderPlaylistTracks(user.id, created.id, [original[0]!, original[0]!, original[1]!]),
+      (error: unknown) => error instanceof AppError && error.statusCode === 400,
+    );
+    await assert.rejects(
+      () => reorderPlaylistTracks(user.id, created.id, [original[0]!]),
+      (error: unknown) => error instanceof AppError && error.statusCode === 400,
+    );
+    await assert.rejects(
+      () => reorderPlaylistTracks(user.id, created.id, [...original.slice(0, 2), 'not-in-playlist']),
+      (error: unknown) => error instanceof AppError && error.statusCode === 400,
+    );
+    const stranger = await newUser();
+    await assert.rejects(() => reorderPlaylistTracks(stranger.id, created.id, reversed), NotFoundError);
   });
 });

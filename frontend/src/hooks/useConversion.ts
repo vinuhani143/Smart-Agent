@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useRef } from 'react';
 import { apiFetch } from '@/services/api';
+import { createIdempotencyGuard } from '@/utils/idempotency';
 import type {
   ConversionResult,
   ConvertibleProvider,
@@ -55,16 +57,19 @@ export function useConfirmConversion() {
 
 export function useCreateConversion() {
   const queryClient = useQueryClient();
+  const guard = useRef(createIdempotencyGuard());
   return useMutation({
     mutationFn: (input: { conversionId: string; name?: string; description?: string }) =>
       apiFetch<ConversionResult>(`/api/conversions/${input.conversionId}/create`, {
         method: 'POST',
+        headers: { 'Idempotency-Key': guard.current.keyFor(input) },
         body: JSON.stringify({
           name: input.name,
           description: input.description,
         }),
       }),
     onSuccess: () => {
+      guard.current.reset();
       void queryClient.invalidateQueries({ queryKey: ['playlists'] });
     },
   });

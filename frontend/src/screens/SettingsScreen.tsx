@@ -1,8 +1,11 @@
 import Constants from 'expo-constants';
-import { Linking, StyleSheet, Text, View } from 'react-native';
+import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Switch } from 'react-native-paper';
 import { useState } from 'react';
+import { router } from 'expo-router';
+import { AppButton } from '@/components/AppButton';
 import { AppCard } from '@/components/AppCard';
+import { AppInput } from '@/components/AppInput';
 import { Chip } from '@/components/Chip';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { ErrorState } from '@/components/ErrorState';
@@ -12,6 +15,7 @@ import { Screen } from '@/components/Screen';
 import { useAiStatus } from '@/hooks/useAiStatus';
 import { useConnectProvider, useDisconnectProvider, useProviders } from '@/hooks/useProviders';
 import { useAuthStore } from '@/store/authStore';
+import { apiFetch, restoreWithRecoveryCode } from '@/services/api';
 import { usePreferencesStore } from '@/store/preferencesStore';
 import { useToast } from '@/components/ToastProvider';
 import { useAppTheme } from '@/theme/AppThemeProvider';
@@ -33,6 +37,12 @@ export function SettingsScreen() {
   const { colors } = useAppTheme();
   const toast = useToast();
   const userId = useAuthStore((state) => state.userId);
+  const recoveryCode = useAuthStore((state) => state.recoveryCode);
+  const accountWarning = useAuthStore((state) => state.accountWarning);
+  const clearSession = useAuthStore((state) => state.clearSession);
+  const [restoreCode, setRestoreCode] = useState('');
+  const [restoreBusy, setRestoreBusy] = useState(false);
+  const [confirmDeleteAccount, setConfirmDeleteAccount] = useState(false);
   const themePreference = usePreferencesStore((state) => state.themePreference);
   const setThemePreference = usePreferencesStore((state) => state.setThemePreference);
   const notificationsEnabled = usePreferencesStore((state) => state.notificationsEnabled);
@@ -50,10 +60,53 @@ export function SettingsScreen() {
 
       <Text style={[styles.section, { color: colors.text }]}>Account</Text>
       <AppCard>
-        <Text style={[styles.body, { color: colors.text }]}>Signed in to MusicMix</Text>
+        <Text style={[styles.body, { color: colors.text }]}>Device-only MusicMix account</Text>
         <Text style={[styles.meta, { color: colors.muted }]}>
           {userId ? `Account ID ${userId.slice(0, 8)}…` : 'Session is stored securely on this device.'}
         </Text>
+        <Text style={[styles.meta, { color: colors.warning, marginTop: 8 }]}>
+          {accountWarning ??
+            'If you uninstall the app, clear data, or lose the recovery code, MusicMix playlists cannot be restored. There is no email login yet.'}
+        </Text>
+        {recoveryCode ? (
+          <Text style={[styles.body, { color: colors.text, marginTop: 8 }]} accessibilityLabel="Recovery code">
+            Recovery code: {recoveryCode}
+          </Text>
+        ) : (
+          <Text style={[styles.meta, { color: colors.muted, marginTop: 8 }]}>
+            The recovery code is shown once at first launch and stored only on this device.
+          </Text>
+        )}
+        <AppInput
+          label="Restore with recovery code"
+          value={restoreCode}
+          onChangeText={setRestoreCode}
+          autoCapitalize="characters"
+          autoCorrect={false}
+          accessibilityLabel="Recovery code to restore a previous device account"
+        />
+        <AppButton
+          label="Restore account"
+          variant="secondary"
+          loading={restoreBusy}
+          accessibilityHint="Replaces this device session with the account for the recovery code"
+          onPress={() => {
+            setRestoreBusy(true);
+            void restoreWithRecoveryCode(restoreCode, { deleteThrowaway: true })
+              .then(() => {
+                setRestoreCode('');
+                toast.show('Account restored', 'success');
+              })
+              .catch((error: unknown) => toast.show(toUserMessage(error), 'error'))
+              .finally(() => setRestoreBusy(false));
+          }}
+        />
+        <AppButton
+          label="Delete MusicMix account"
+          variant="danger"
+          onPress={() => setConfirmDeleteAccount(true)}
+          accessibilityHint="Removes MusicMix data and stored tokens on the server"
+        />
       </AppCard>
 
       <Text style={[styles.section, { color: colors.text }]}>Music Services</Text>
@@ -140,11 +193,15 @@ export function SettingsScreen() {
         <Text style={[styles.meta, { color: colors.muted }]}>
           Playlist manager for official music APIs. Amazon Music Web API access is a closed beta and stays unavailable until Amazon approves credentials for this app.
         </Text>
-        <Text style={[styles.body, { color: colors.text, marginTop: 8 }]}>Terms</Text>
+        <Pressable onPress={() => router.push('/legal/terms')} accessibilityRole="link" accessibilityLabel="Open draft terms">
+          <Text style={[styles.body, { color: colors.text, marginTop: 8 }]}>Terms (draft — requires legal review)</Text>
+        </Pressable>
         <Text style={[styles.meta, { color: colors.muted }]}>
           Use only official provider APIs and your own accounts. Do not attempt to bypass service restrictions.
         </Text>
-        <Text style={[styles.body, { color: colors.text, marginTop: 8 }]}>Privacy Policy</Text>
+        <Pressable onPress={() => router.push('/legal/privacy')} accessibilityRole="link" accessibilityLabel="Open draft privacy policy">
+          <Text style={[styles.body, { color: colors.text, marginTop: 8 }]}>Privacy Policy (draft — requires legal review)</Text>
+        </Pressable>
         <Text style={[styles.meta, { color: colors.muted }]}>
           Account and provider tokens are stored securely on the backend. See Privacy above.
         </Text>
@@ -171,6 +228,21 @@ export function SettingsScreen() {
             () => toast.show('Disconnected', 'info'),
             (error: unknown) => toast.show(toUserMessage(error), 'error'),
           );
+        }}
+      />
+      <ConfirmDialog
+        visible={confirmDeleteAccount}
+        title="Delete MusicMix account?"
+        message="This deletes your MusicMix playlists, conversions, AI jobs, and stored provider tokens. Playlists already created on Spotify, YouTube, or Amazon Music are not deleted there. This cannot be undone."
+        confirmLabel="Delete account"
+        danger
+        onCancel={() => setConfirmDeleteAccount(false)}
+        onConfirm={() => {
+          setConfirmDeleteAccount(false);
+          void apiFetch('/api/auth/account', { method: 'DELETE' })
+            .then(() => clearSession())
+            .then(() => toast.show('Account deleted', 'info'))
+            .catch((error: unknown) => toast.show(toUserMessage(error), 'error'));
         }}
       />
     </Screen>

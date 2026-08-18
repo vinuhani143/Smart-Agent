@@ -59,6 +59,8 @@ function RootNavigation() {
           <Stack.Screen name="playlist/convert" options={{ headerShown: true, title: 'Convert Playlist' }} />
           <Stack.Screen name="playlist/new" options={{ headerShown: true, title: 'Custom Playlist' }} />
           <Stack.Screen name="playlist/[id]" options={{ headerShown: true, title: 'Playlist' }} />
+          <Stack.Screen name="legal/privacy" options={{ headerShown: true, title: 'Privacy Policy' }} />
+          <Stack.Screen name="legal/terms" options={{ headerShown: true, title: 'Terms' }} />
           <Stack.Screen name="auth/callback" />
         </Stack>
       </ToastProvider>

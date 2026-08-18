@@ -5,6 +5,7 @@ import { describeAiConfig } from '../ai/configurableLlmProvider';
 import { AppError, ErrorCode } from '../types/errors';
 import type { TrackResult } from '../types/provider';
 import { oncePerKey } from '../utils/inFlight';
+import { withIdempotency } from '../services/IdempotencyService';
 import { providerIdSchema, searchProviderSchema, trackResultSchema } from '../validation/schemas';
 
 export const generateAiPlaylistSchema = z
@@ -111,10 +112,12 @@ export async function replaceAiPlaylistTrack(req: Request, res: Response): Promi
 
 export async function createAiPlaylist(req: Request, res: Response): Promise<void> {
   const body = createAiPlaylistSchema.parse(req.body ?? {});
-  const result = await oncePerKey(`ai:create:${req.userId}:${String(req.params.id)}`, () =>
-    PlaylistGeneratorService.createOnProvider(req.userId!, String(req.params.id), body.destinationProvider),
-  );
-  res.json(result);
+  await withIdempotency(req, res, req.userId!, async () => {
+    const result = await oncePerKey(`ai:create:${req.userId}:${String(req.params.id)}`, () =>
+      PlaylistGeneratorService.createOnProvider(req.userId!, String(req.params.id), body.destinationProvider),
+    );
+    return { status: 200, body: result };
+  });
 }
 
 export async function generatePlaylist(req: Request, res: Response): Promise<void> {

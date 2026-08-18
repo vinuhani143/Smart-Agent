@@ -1,6 +1,6 @@
 import * as SecureStore from 'expo-secure-store';
 import { create } from 'zustand';
-import { API_URL, SESSION_TOKEN_KEY } from '@/constants/config';
+import { API_URL, RECOVERY_CODE_KEY, SESSION_TOKEN_KEY } from '@/constants/config';
 import { ApiClientError, messageForHttpStatus } from '@/utils/errors';
 import type { ApiErrorBody } from '@/types';
 
@@ -9,27 +9,55 @@ const REQUEST_TIMEOUT_MS = 20_000;
 interface AuthState {
   token: string | null;
   userId: string | null;
+  anonymous: boolean;
+  recoveryCode: string | null;
+  accountWarning: string | null;
   hydrated: boolean;
-  setSession: (token: string, userId: string) => Promise<void>;
+  setSession: (
+    token: string,
+    userId: string,
+    extras?: { recoveryCode?: string; warning?: string; anonymous?: boolean },
+  ) => Promise<void>;
   hydrate: () => Promise<void>;
+  expireSession: () => Promise<void>;
   clearSession: () => Promise<void>;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
   token: null,
   userId: null,
+  anonymous: true,
+  recoveryCode: null,
+  accountWarning: null,
   hydrated: false,
-  async setSession(token, userId) {
+  async setSession(token, userId, extras) {
     await SecureStore.setItemAsync(SESSION_TOKEN_KEY, token);
-    set({ token, userId, hydrated: true });
+    if (extras?.recoveryCode) {
+      await SecureStore.setItemAsync(RECOVERY_CODE_KEY, extras.recoveryCode);
+    }
+    const storedCode = extras?.recoveryCode ?? (await SecureStore.getItemAsync(RECOVERY_CODE_KEY));
+    set({
+      token,
+      userId,
+      hydrated: true,
+      anonymous: extras?.anonymous ?? true,
+      recoveryCode: storedCode,
+      accountWarning: extras?.warning ?? null,
+    });
   },
   async hydrate() {
     const token = await SecureStore.getItemAsync(SESSION_TOKEN_KEY);
-    set({ token, hydrated: true });
+    const recoveryCode = await SecureStore.getItemAsync(RECOVERY_CODE_KEY);
+    set({ token, recoveryCode, hydrated: true });
+  },
+  async expireSession() {
+    await SecureStore.deleteItemAsync(SESSION_TOKEN_KEY);
+    set({ token: null, userId: null, hydrated: true });
   },
   async clearSession() {
     await SecureStore.deleteItemAsync(SESSION_TOKEN_KEY);
-    set({ token: null, userId: null, hydrated: true });
+    await SecureStore.deleteItemAsync(RECOVERY_CODE_KEY);
+    set({ token: null, userId: null, recoveryCode: null, accountWarning: null, hydrated: true, anonymous: true });
   },
 }));
 
@@ -90,7 +118,7 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}, isRetry 
   if (response.status === 401 && !isRetry && path !== '/api/auth/session') {
     const unauthorized = await parseError(response);
     if (isMusicMixSessionError(unauthorized)) {
-      await useAuthStore.getState().clearSession();
+      await useAuthStore.getState().expireSession();
       await ensureSession();
       return apiFetch<T>(path, init, true);
     }
@@ -106,13 +134,62 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}, isRetry 
   return (await response.json()) as T;
 }
 
+export async function restoreWithRecoveryCode(
+  recoveryCode: string,
+  options: { deleteThrowaway?: boolean } = {},
+): Promise<void> {
+  const throwawayToken = useAuthStore.getState().token;
+  const response = await fetch(`${API_URL}/api/auth/recover`, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ recoveryCode: recoveryCode.trim() }),
+  });
+  if (!response.ok) {
+    throw await parseError(response);
+  }
+  const recovered = (await response.json()) as { token: string; userId: string; anonymous?: boolean };
+  if (options.deleteThrowaway && throwawayToken && throwawayToken !== recovered.token) {
+    await fetch(`${API_URL}/api/auth/account`, {
+      method: 'DELETE',
+      headers: { Accept: 'application/json', Authorization: `Bearer ${throwawayToken}` },
+    }).catch(() => undefined);
+  }
+  await useAuthStore.getState().setSession(recovered.token, recovered.userId, {
+    anonymous: recovered.anonymous ?? true,
+    recoveryCode: recoveryCode.trim().toUpperCase(),
+  });
+}
+
 export async function ensureSession(): Promise<void> {
   await useAuthStore.getState().hydrate();
   if (useAuthStore.getState().token) {
     return;
   }
-  const created = await apiFetch<{ token: string; userId: string }>('/api/auth/session', {
-    method: 'POST',
-  }, true);
-  await useAuthStore.getState().setSession(created.token, created.userId);
+  const recoveryCode = useAuthStore.getState().recoveryCode;
+  if (recoveryCode) {
+    try {
+      await restoreWithRecoveryCode(recoveryCode);
+      return;
+    } catch {
+      // Invalid or deleted recovery code: create a new device-only account.
+    }
+  }
+  const created = await apiFetch<{
+    token: string;
+    userId: string;
+    anonymous?: boolean;
+    recoveryCode?: string;
+    warning?: string;
+  }>(
+    '/api/auth/session',
+    {
+      method: 'POST',
+    },
+    true,
+  );
+  await useAuthStore.getState().setSession(created.token, created.userId, {
+    anonymous: created.anonymous,
+    recoveryCode: created.recoveryCode,
+    warning: created.warning,
+  });
 }

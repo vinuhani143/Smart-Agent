@@ -18,6 +18,7 @@ import { isNonRetryableProviderError } from '../providers/youtube/youtubeErrors'
 import { mapPool } from '../utils/asyncPool';
 import { withTransientRetry } from '../utils/retry';
 import { requireStoredAccount, withProviderTokens } from './TokenService';
+import { runRemotePlaylistCreate } from './RemotePlaylistOperations';
 import { matchTrack, type MatchMethod } from './TrackMatcher';
 import { upsertTrack } from './SearchService';
 import {
@@ -329,18 +330,29 @@ export async function createConvertedPlaylist(
 
   try {
     if (!destinationPlaylistId) {
-      const created = await withProviderTokens(userId, destination, (tokens) =>
-        withTransientRetry(() =>
-          adapter.createPlaylist(tokens, {
-            name: playlistName,
-            description: playlistDescription,
-          }),
-        ),
-      );
-      destinationPlaylistId = created.providerPlaylistId;
-      await prisma.playlistConversion.update({
-        where: { id: conversion.id },
-        data: { destinationPlaylistId },
+      await runRemotePlaylistCreate({
+        userId,
+        provider: destination,
+        purpose: `conversion:${conversion.id}`,
+        createRemote: async () => {
+          const created = await withProviderTokens(userId, destination, (tokens) =>
+            withTransientRetry(() =>
+              adapter.createPlaylist(tokens, {
+                name: playlistName,
+                description: playlistDescription,
+              }),
+            ),
+          );
+          return { providerPlaylistId: created.providerPlaylistId };
+        },
+        persistLocal: async (remoteId) => {
+          destinationPlaylistId = remoteId;
+          await prisma.playlistConversion.update({
+            where: { id: conversion.id },
+            data: { destinationPlaylistId: remoteId },
+          });
+          return { id: remoteId };
+        },
       });
     }
 
@@ -389,6 +401,10 @@ export async function createConvertedPlaylist(
           });
         }
       }
+    }
+
+    if (!destinationPlaylistId) {
+      throw new ConflictError('The destination playlist was not created, so MusicMix cannot save a local copy.');
     }
 
     const local = await persistLocalCopy(userId, conversion, destination, destinationPlaylistId, eligible, playlistName, playlistDescription);

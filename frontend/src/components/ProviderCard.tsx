@@ -58,7 +58,7 @@ export function ProviderCard({
           onPress={provider.connected ? (onManage ?? onDisconnect) : onConnect}
           disabled={busy}
           accessibilityRole="button"
-          accessibilityLabel={provider.connected ? 'Manage' : 'Connect'}
+          accessibilityLabel={provider.connected ? `Manage ${meta.label}` : `Connect ${meta.label}`}
           style={[
             styles.button,
             { backgroundColor: provider.connected ? colors.elevated : colors.accent, minHeight: MIN_TOUCH },

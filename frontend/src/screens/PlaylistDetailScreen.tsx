@@ -9,7 +9,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { LoadingState } from '@/components/LoadingState';
 import { Screen } from '@/components/Screen';
-import { useDeletePlaylist, usePlaylist, useRemoveTrack, useUpdatePlaylist } from '@/hooks/usePlaylists';
+import { useDeletePlaylist, usePlaylist, useRemoveTrack, useReorderTracks, useUpdatePlaylist } from '@/hooks/usePlaylists';
 import { useToast } from '@/components/ToastProvider';
 import { useAppTheme } from '@/theme/AppThemeProvider';
 import { formatDuration, formatTrackCount } from '@/utils/format';
@@ -23,6 +23,7 @@ export function PlaylistDetailScreen() {
   const remove = useDeletePlaylist();
   const update = useUpdatePlaylist();
   const removeTrack = useRemoveTrack();
+  const reorder = useReorderTracks();
   const playlist = playlistQuery.data?.playlist;
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState('');
@@ -92,14 +93,61 @@ export function PlaylistDetailScreen() {
             <AppButton label="Delete" variant="danger" onPress={() => setConfirmDelete(true)} />
           </View>
 
-          {(playlist.tracks ?? []).map((track) => (
-            <View key={track.id} style={[styles.trackRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          {(playlist.tracks ?? []).map((track, index) => (
+            <View
+              key={track.id}
+              accessible
+              accessibilityLabel={`${index + 1} of ${playlist.tracks?.length ?? 0}. ${track.title} by ${track.artist}`}
+              style={[styles.trackRow, { backgroundColor: colors.card, borderColor: colors.border }]}
+            >
               <View style={styles.flex}>
                 <Text style={[styles.trackTitle, { color: colors.text }]}>{track.title}</Text>
                 <Text style={[styles.trackArtist, { color: colors.muted }]}>
                   {track.artist} · {formatDuration(track.durationMs)}
                 </Text>
               </View>
+              <AppButton
+                label="Up"
+                variant="ghost"
+                disabled={index === 0 || reorder.isPending}
+                accessibilityHint="Move this song earlier in the playlist"
+                onPress={() => {
+                  if (!id) {
+                    return;
+                  }
+                  const ids = (playlist.tracks ?? []).map((item) => item.id);
+                  const next = [...ids];
+                  const current = next[index];
+                  const previous = next[index - 1];
+                  if (!current || !previous) {
+                    return;
+                  }
+                  next[index - 1] = current;
+                  next[index] = previous;
+                  void reorder.mutateAsync({ playlistId: id, trackIds: next }).then(() => toast.show('Order updated', 'success'));
+                }}
+              />
+              <AppButton
+                label="Down"
+                variant="ghost"
+                disabled={index === (playlist.tracks ?? []).length - 1 || reorder.isPending}
+                accessibilityHint="Move this song later in the playlist"
+                onPress={() => {
+                  if (!id) {
+                    return;
+                  }
+                  const ids = (playlist.tracks ?? []).map((item) => item.id);
+                  const next = [...ids];
+                  const current = next[index];
+                  const following = next[index + 1];
+                  if (!current || !following) {
+                    return;
+                  }
+                  next[index + 1] = current;
+                  next[index] = following;
+                  void reorder.mutateAsync({ playlistId: id, trackIds: next }).then(() => toast.show('Order updated', 'success'));
+                }}
+              />
               <AppButton label="Remove" variant="ghost" onPress={() => setPendingTrackId(track.id)} />
             </View>
           ))}

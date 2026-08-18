@@ -46,18 +46,36 @@ enum ConversionTrackStatus {
   DUPLICATE
 }
 
+enum AccountKind {
+  ANONYMOUS
+}
+
+enum RemoteOperationStatus {
+  PENDING
+  REMOTE_CREATED
+  COMPLETE
+  FAILED
+  ROLLED_BACK
+  REMOTE_CLEANUP_REQUIRED
+}
+
 model User {
-  id                  String                       @id @default(cuid())
-  email               String?                      @unique
-  displayName         String?
-  createdAt           DateTime                     @default(now())
-  updatedAt           DateTime                     @updatedAt
-  musicAccounts       MusicAccount[]
-  playlists           Playlist[]
-  generationRequests  PlaylistGenerationRequest[]
-  playlistGenerations PlaylistGeneration[]
-  conversions         PlaylistConversion[]
-  oauthStates         OAuthState[]
+  id                   String                       @id @default(cuid())
+  email                String?                      @unique
+  displayName          String?
+  accountKind          AccountKind                  @default(ANONYMOUS)
+  recoveryCodeHash     String?                      @unique
+  recoveryCodeIssuedAt DateTime?
+  createdAt            DateTime                     @default(now())
+  updatedAt            DateTime                     @updatedAt
+  musicAccounts        MusicAccount[]
+  playlists            Playlist[]
+  generationRequests   PlaylistGenerationRequest[]
+  playlistGenerations  PlaylistGeneration[]
+  conversions          PlaylistConversion[]
+  oauthStates          OAuthState[]
+  remoteOperations     RemotePlaylistOperation[]
+  idempotencyRecords   IdempotencyRecord[]
 }
 
 /// Connected music-service account. accessToken and refreshToken MUST be
@@ -255,4 +273,40 @@ model ConversionTrack {
   conversion           PlaylistConversion    @relation(fields: [conversionId], references: [id], onDelete: Cascade)
 
   @@index([conversionId, position])
+}
+
+/// Compensating record when a provider playlist is created before local persist.
+/// Not a distributed ACID transaction. Ordinary clients never list these rows.
+model RemotePlaylistOperation {
+  id               String                @id @default(cuid())
+  userId           String
+  provider         MusicProviderName
+  purpose          String
+  localPlaylistId  String?
+  remotePlaylistId String?
+  status           RemoteOperationStatus @default(PENDING)
+  errorMessage     String?
+  retryCount       Int                   @default(0)
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+  user             User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status, updatedAt])
+  @@index([userId, createdAt])
+}
+
+/// Replay protection for create playlist / convert / AI create.
+model IdempotencyRecord {
+  id           String   @id @default(cuid())
+  userId       String
+  key          String
+  method       String
+  path         String
+  statusCode   Int
+  responseJson Json
+  createdAt    DateTime @default(now())
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, key])
+  @@index([createdAt])
 }

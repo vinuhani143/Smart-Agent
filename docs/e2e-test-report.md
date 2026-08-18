@@ -1,8 +1,8 @@
-# MusicMix end-to-end test report (STEP 9)
+# MusicMix end-to-end test report (STEP 9.5)
 
 Date: 2026-08-18  
-Scope: Expo app + Express API + Prisma (branch `cursor/e2e-testing-qa-46b7`).  
-This pass is testing, debugging, and release readiness. No Android AAB/APK was produced.
+Scope: Expo app + Express API + Prisma (branch `cursor/release-blockers-46b7`, based on STEP 9 QA).  
+This pass resolves code/configuration release blockers that do not require live credentials. No Android AAB/APK was produced.
 
 ## How to read statuses
 
@@ -12,7 +12,7 @@ This pass is testing, debugging, and release readiness. No Android AAB/APK was p
 | **FAIL** | Observed incorrect behavior or a missing required capability. |
 | **BLOCKED** | Could not execute because credentials, a device, or a service were missing. Not treated as PASS. |
 
-Automated Node tests: **backend 191 pass / 0 fail**, **frontend 16 pass / 0 fail** (**207** total).  
+Automated Node tests: **backend 209 pass / 0 fail**, **frontend 21 pass / 0 fail** (**230** total).  
 Live Spotify, YouTube, Amazon (enabled), and AI provider E2E were **not** run: `SPOTIFY_*`, `GOOGLE_*`, `AI_API_KEY`, and Amazon approval/credentials are empty. No Android emulator or device was attached.
 
 ---
@@ -23,13 +23,13 @@ Live Spotify, YouTube, Amazon (enabled), and AI provider E2E were **not** run: `
 | --- | --- | --- | --- | --- | --- | --- |
 | ENV-01 | Backend start | `npx tsx src/server.ts` with validated env | API listens; `GET /api/health` returns `{ ok: true }` | HTTP 200 `{ ok: true, service: "musicmix-backend" }` | PASS | Local Postgres + generated JWT/encryption keys (not committed). |
 | ENV-02 | Frontend tooling | Expo project diagnostics | Expo doctor passes | `expo-doctor`: 21/21 checks passed | PASS | Interactive Metro UI was not left running. |
-| ENV-03 | PostgreSQL | Prisma can connect | Migrations apply | Six migrations previously applied; `pg_isready` accepting connections | PASS | |
+| ENV-03 | PostgreSQL | Prisma can connect | Migrations apply | Seven migrations applied (`20260818180000_release_ops` included); `pg_isready` accepting connections | PASS | |
 | ENV-04 | Prisma schema | `npx prisma validate` | Schema valid | `The schema at prisma/schema.prisma is valid` | PASS | |
 | ENV-05 | Env validation | Missing `DATABASE_URL` | Process refuses to start | Start without DB URL: `Invalid environment configuration: DATABASE_URL` | PASS | Zod `loadEnv()`. |
 | ENV-06 | Env templates | `.env.example` / `.env.test.example` | Placeholders only; no real secrets | Files contain empty/placeholder values; `.gitignore` allows the example files | PASS | Never commit real credentials. |
 | ENV-07 | TypeScript | Backend + frontend `tsc --noEmit` | No errors | Both packages pass | PASS | Root `npx tsc --noEmit` is not a project compiler; use `npm run typecheck`. |
 | ENV-08 | Lint | `npm run lint` | A defined gate exists | Script runs `npm run typecheck` (no ESLint config) | PASS | Dedicated ESLint is still missing (see release blockers). |
-| ENV-09 | `npm test` | Root test script | Backend + frontend tests run | 207 pass / 0 fail | PASS | |
+| ENV-09 | `npm test` | Root test script | Backend + frontend tests run | 230 pass / 0 fail | PASS | |
 
 ---
 
@@ -37,7 +37,7 @@ Live Spotify, YouTube, Amazon (enabled), and AI provider E2E were **not** run: `
 
 | Test ID | Feature | Scenario | Expected Result | Actual Result | Status | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| AUTO-01 | Unit + integration | All `src/**/*.test.ts` | All pass | Backend 191, frontend 16 | PASS | |
+| AUTO-01 | Unit + integration | All `src/**/*.test.ts` | All pass | Backend 209, frontend 21 | PASS | Includes reorder, compensating remote create, recovery, idempotency keys |
 | AUTO-02 | Auth HTTP | Missing / malformed / expired JWT | 401, no JWT internals in body | Integration tests pass | PASS | |
 | AUTO-03 | IDOR | User B reads/modifies User A playlist, conversion, AI generation | 404 | Integration tests pass | PASS | Confirm/create conversion and AI create also 404. |
 | AUTO-04 | Spotify adapter | PKCE URL, search mapping, 401 mapping | No client secret in URL; real Spotify ids; no invented ISRC; token not in errors | Unit tests with mocked `fetch` | PASS | Not a live Spotify account. |
@@ -125,7 +125,7 @@ Official Amazon Music Web API access is **not configured**. `AMAZON_MUSIC_ENABLE
 | PL-01 | Create | Local playlist | 201 + id | HTTP smoke 201 | PASS | |
 | PL-02 | Add songs | Add track | Track stored | DB + controller tests | PASS | `oncePerKey` on add. |
 | PL-03 | Remove songs | Remove track | Remaining reindexed | DB integration | PASS | |
-| PL-04 | Reorder | Change order on a saved MusicMix playlist | Persist new order | No REST reorder endpoint; Playlist detail has no move controls | FAIL | AI preview can move tracks (`TrackRow` up/down). Provider reorder exists on adapters only. |
+| PL-04 | Reorder | Change order on a saved MusicMix playlist | Persist new order | `PATCH /api/playlists/:id/tracks/reorder` + Playlist detail Up/Down; DB + IDOR tests | PASS | Device drag UX still BLOCKED (controls are buttons). |
 | PL-05 | Rename | Update name | Saved | DB `updatePlaylist` | PASS | UI `maxLength={120}`. |
 | PL-06 | Edit description | Update description | Saved | DB integration | PASS | Cap 2000. |
 | PL-07 | Delete | Delete playlist | 204 / not found after | DB + IDOR tests | PASS | |
@@ -278,7 +278,7 @@ No emulator/device. Layout reviewed in source (`Screen` SafeArea + KeyboardAvoid
 | DB-03 | Unique PlaylistTrack | Same track twice | Duplicate rejected | Integration + Prisma unique | PASS | |
 | DB-04 | Duplicate prevention | Application + DB | DuplicateTrackError | Integration | PASS | |
 | DB-05 | Transactions | Unique violation mid-create | No leftover playlist | Integration rollback test | PASS | |
-| DB-06 | Partial remote add | Provider playlist created, local TX fails | Possible orphan remote playlist | Remote create still happens before local persist | FAIL | Documented MEDIUM; not rewritten in this QA step (would be a larger provider flow change). |
+| DB-06 | Partial remote add | Provider playlist created, local TX fails | Compensate: delete remote or mark cleanup required | `RemotePlaylistOperation` + tests for success, remote fail, rollback, cleanup-required | PASS | Not a distributed ACID transaction. Internal cleanup uses `INTERNAL_CLEANUP_KEY`. |
 | DB-07 | Ownership | `getPlaylist(userId, id)` | Stranger NotFound | Integration | PASS | |
 
 ---
@@ -333,16 +333,15 @@ Counted from the tables above (each Test ID is one case).
 
 | Status | Count |
 | --- | --- |
-| PASS | 125 |
-| FAIL | 2 |
+| PASS | 127 |
+| FAIL | 0 |
 | BLOCKED | 47 |
 | **Total** | **174** |
 
-Automated Node tests (separate from the scenario table): **207 passed**, **0 failed**.
+Automated Node tests (separate from the scenario table): **230 passed**, **0 failed**.
 
-FAIL items:
-
-1. **PL-04** — Saved custom playlist reorder is not exposed in the API or Playlist detail UI.  
-2. **DB-06** — Remote provider playlist is created before the local Prisma transaction; a local failure can leave an orphan remote playlist.
+FAIL items: none remaining from STEP 9 (PL-04 and DB-06 were fixed in STEP 9.5).
 
 BLOCKED items are primarily live Spotify/YouTube/Amazon/AI OAuth and Android device/UI/performance profiling.
+
+This report does **not** claim production readiness or a live OAuth/AI PASS.

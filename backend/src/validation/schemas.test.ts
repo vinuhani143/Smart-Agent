@@ -9,7 +9,12 @@ describe('searchQuerySchema', () => {
     assert.equal(searchQuerySchema.safeParse({ q: 'a'.repeat(201) }).success, false);
     assert.equal(searchQuerySchema.safeParse({ q: 'telugu', durationMinMs: -1 }).success, false);
     assert.equal(searchQuerySchema.safeParse({ q: 'telugu', yearFrom: 1800 }).success, false);
-    assert.equal(searchQuerySchema.safeParse({ q: 'telugu romantic' }).success, true);
+    assert.equal(searchQuerySchema.safeParse({ q: 'తెలుగు రొమాంటిక్' }).success, true);
+    assert.equal(searchQuerySchema.safeParse({ q: 'हिन्दी गाने' }).success, true);
+    assert.equal(searchQuerySchema.safeParse({ q: "O'Brien & sons / 90s!" }).success, true);
+    assert.equal(searchQuerySchema.safeParse({ q: 'தமிழ் பாடல்கள்' }).success, true);
+    assert.equal(searchQuerySchema.safeParse({ q: 'English hits' }).success, true);
+    assert.equal(searchQuerySchema.safeParse({ q: '' }).success, false);
   });
 });
 

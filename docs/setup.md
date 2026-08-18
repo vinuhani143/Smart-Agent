@@ -43,7 +43,7 @@ cp .env.example backend/.env
 cp frontend/.env.example frontend/.env
 ```
 
-Production hosts should copy `.env.production.example` and `frontend/.env.production.example` into a secret manager instead. Those files contain placeholders only.
+Automated tests that need a database can copy `.env.test.example` to a gitignored `.env.test`. Production hosts should copy `.env.production.example` and `frontend/.env.production.example` into a secret manager instead. Those files contain placeholders only.
 
 Generate secrets (do not commit them):
 
@@ -213,9 +213,22 @@ User prompts are sent to that provider. MusicMix stores the prompt and parsed in
 
 Same-service copies are blocked unless you check **Duplicate this playlist on the same service**.
 
-## Typecheck
+## Typecheck and tests
+
+From the repository root:
 
 ```bash
-cd backend && npm run typecheck
-cd ../frontend && npm run typecheck
+npm test
+npm run lint
+npx tsc --noEmit
+npx prisma validate --schema prisma/schema.prisma
 ```
+
+`npm run lint` currently runs the same TypeScript checks as `npm run typecheck` because ESLint is not configured. Dedicated ESLint remains a follow-up.
+
+```bash
+cd backend && npm run typecheck && npm test
+cd ../frontend && npm run typecheck && npm test
+```
+
+Automated tests that need Postgres use the same `DATABASE_URL` as development, or a dedicated database from `.env.test.example` (placeholders only).

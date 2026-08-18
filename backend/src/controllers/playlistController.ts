@@ -103,7 +103,11 @@ export async function remove(req: Request, res: Response): Promise<void> {
 
 export async function addTrack(req: Request, res: Response): Promise<void> {
   const body = addTrackSchema.parse(req.body);
-  const playlist = await addTrackToPlaylist(req.userId!, String(req.params.id), body.track);
+  const track = body.track;
+  const playlist = await oncePerKey(
+    `playlist:add:${req.userId}:${String(req.params.id)}:${track.provider}:${track.providerTrackId}`,
+    () => addTrackToPlaylist(req.userId!, String(req.params.id), track),
+  );
   res.json({ playlist: serializePlaylist(playlist) });
 }
 

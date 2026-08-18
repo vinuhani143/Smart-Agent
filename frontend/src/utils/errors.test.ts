@@ -31,6 +31,8 @@ describe('messageForHttpStatus', () => {
     assert.match(messageForHttpStatus(429, ''), /too many/i);
     assert.match(messageForHttpStatus(500, ''), /try again/i);
     assert.match(messageForHttpStatus(503, ''), /unavailable/i);
+    assert.match(messageForHttpStatus(400, ''), /failed/i);
+    assert.match(messageForHttpStatus(502, ''), /try again/i);
     assert.equal(messageForHttpStatus(401, 'Reconnect Spotify.'), 'Reconnect Spotify.');
   });
 });

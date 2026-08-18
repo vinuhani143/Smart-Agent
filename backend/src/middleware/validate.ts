@@ -41,7 +41,7 @@ export function validateQuery<T>(schema: ZodType<T>): RequestHandler {
       );
       return;
     }
-    req.query = result.data as typeof req.query;
+    // Express 5 exposes req.query as a getter; assigning it throws TypeError.
     next();
   };
 }

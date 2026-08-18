@@ -38,7 +38,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
-    "test": "../backend/node_modules/.bin/tsx --test src/utils/*.test.ts"
+    "test": "../backend/node_modules/.bin/tsx --test $(find src -name '*.test.ts')"
   },
   "private": true
 }

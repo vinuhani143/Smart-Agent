@@ -72,6 +72,11 @@ export function getEnv(): Env {
   return loadEnv();
 }
 
+/** Test-only: drop the cached parse so later process.env changes are picked up. */
+export function resetEnvCache(): void {
+  cached = undefined;
+}
+
 export function corsOriginList(env: Env): string[] {
   return env.CORS_ORIGINS.split(',')
     .map((origin) => origin.trim())

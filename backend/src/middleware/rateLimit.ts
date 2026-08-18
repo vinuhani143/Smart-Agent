@@ -1,40 +1,38 @@
-import { rateLimit } from 'express-rate-limit';
+import { rateLimit, type RateLimitRequestHandler } from 'express-rate-limit';
 
-export const apiRateLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 300,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: {
-    error: {
-      code: 'RATE_LIMITED',
-      message: 'Too many requests. Please wait a moment and try again.',
+export function createJsonRateLimiter(
+  limit: number,
+  windowMs: number,
+  message: string,
+): RateLimitRequestHandler {
+  return rateLimit({
+    windowMs,
+    limit,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+      error: {
+        code: 'RATE_LIMITED',
+        message,
+      },
     },
-  },
-});
+  });
+}
 
-export const aiGenerateLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 20,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: {
-    error: {
-      code: 'RATE_LIMITED',
-      message: 'Too many playlist generation requests. Please wait a moment and try again.',
-    },
-  },
-});
+export const apiRateLimiter = createJsonRateLimiter(
+  300,
+  15 * 60 * 1000,
+  'Too many requests. Please wait a moment and try again.',
+);
 
-export const authRateLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 40,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: {
-    error: {
-      code: 'RATE_LIMITED',
-      message: 'Too many sign-in attempts. Please wait and try again.',
-    },
-  },
-});
+export const aiGenerateLimiter = createJsonRateLimiter(
+  20,
+  15 * 60 * 1000,
+  'Too many playlist generation requests. Please wait a moment and try again.',
+);
+
+export const authRateLimiter = createJsonRateLimiter(
+  40,
+  15 * 60 * 1000,
+  'Too many sign-in attempts. Please wait and try again.',
+);

@@ -27,6 +27,12 @@ const trackResultSchema = z.object({
   isrc: z.string().optional(),
   thumbnailUrl: z.string().optional(),
   explicit: z.boolean().optional(),
+  originalTitle: z.string().optional(),
+  metadataConfidence: z.number().optional(),
+  parsedTitle: z.string().optional(),
+  parsedArtist: z.string().optional(),
+  youtubeVideoId: z.string().optional(),
+  spotifyId: z.string().optional(),
 });
 
 export const createPlaylistSchema = z.object({
@@ -41,6 +47,7 @@ export const createPlaylistSchema = z.object({
   targetDurationMs: z.number().int().optional(),
   tracks: z.array(trackResultSchema).optional(),
   allowDuplicates: z.boolean().optional(),
+  targetProvider: z.enum(['spotify', 'youtube', 'amazon_music']).optional(),
 });
 
 export const updatePlaylistSchema = z.object({
@@ -131,14 +138,16 @@ export async function convertPreview(req: Request, res: Response): Promise<void>
     const decisions = [];
     for (const item of playlist.tracks) {
       const source: TrackResult = {
-        provider: destination,
-        providerTrackId: item.track.id,
+        provider: item.track.spotifyId ? 'spotify' : item.track.youtubeVideoId ? 'youtube' : destination,
+        providerTrackId: item.track.spotifyId ?? item.track.youtubeVideoId ?? item.track.id,
         title: item.track.title,
         artist: item.track.artist,
         album: item.track.album ?? undefined,
         durationMs: item.track.durationMs ?? undefined,
         isrc: item.track.isrc ?? undefined,
         thumbnailUrl: item.track.thumbnailUrl ?? undefined,
+        spotifyId: item.track.spotifyId ?? undefined,
+        youtubeVideoId: item.track.youtubeVideoId ?? undefined,
       };
       const candidates = await adapter.searchTracks(tokens, {
         query: `${item.track.title} ${item.track.artist}`,

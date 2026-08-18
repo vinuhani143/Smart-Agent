@@ -5,17 +5,32 @@ function isrcKey(isrc: string): string {
   return `isrc:${isrc.replace(/[\s-]/g, '').toUpperCase()}`;
 }
 
-function providerKey(track: TrackResult): string {
-  return `provider:${track.provider}:${track.providerTrackId}`;
-}
-
 function identityKey(track: TrackResult): string {
-  const normalized = normalizeTrackIdentity(track.title, track.artist);
+  const title = track.parsedTitle ?? track.title;
+  const artist = track.parsedArtist ?? track.artist;
+  const normalized = normalizeTrackIdentity(title, artist);
   return `norm:${normalized.artist}|${normalized.title}`;
 }
 
+export function youtubeVideoIdOf(track: TrackResult): string | undefined {
+  return track.youtubeVideoId ?? (track.provider === 'youtube' ? track.providerTrackId : undefined);
+}
+
+export function spotifyIdOf(track: TrackResult): string | undefined {
+  return track.spotifyId ?? (track.provider === 'spotify' ? track.providerTrackId : undefined);
+}
+
 export function trackDuplicateKeys(track: TrackResult): string[] {
-  const keys = [providerKey(track), identityKey(track)];
+  const keys = [identityKey(track)];
+  const youtubeId = youtubeVideoIdOf(track);
+  const spotifyId = spotifyIdOf(track);
+  if (youtubeId) {
+    keys.push(`youtube:${youtubeId}`);
+  }
+  if (spotifyId) {
+    keys.push(`spotify:${spotifyId}`);
+  }
+  keys.push(`provider:${track.provider}:${track.providerTrackId}`);
   if (track.isrc) {
     keys.push(isrcKey(track.isrc));
   }
@@ -36,8 +51,8 @@ export class DuplicateDetector {
   }
 
   /**
-   * Returns unique tracks in original order. Same ISRC, provider id, or
-   * normalized title+artist is treated as a duplicate.
+   * Returns unique tracks in original order. Same ISRC, YouTube video id,
+   * Spotify id, or normalized title+artist is treated as a duplicate.
    */
   unique(tracks: TrackResult[], allowDuplicates = false): TrackResult[] {
     if (allowDuplicates) {

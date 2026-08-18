@@ -10,7 +10,7 @@ import { useProviders } from '@/hooks/useProviders';
 import type { ProviderId } from '@/types';
 import { toUserMessage } from '@/utils/errors';
 
-const PROVIDERS: ProviderId[] = ['spotify', 'youtube', 'amazon_music'];
+const PROVIDERS: ProviderId[] = ['spotify', 'youtube'];
 
 export function CreatePlaylistScreen() {
   const [name, setName] = useState('');
@@ -73,18 +73,18 @@ export function CreatePlaylistScreen() {
             onPress={() => setProvider(id)}
             compact
           >
-            {id === 'amazon_music' ? 'Amazon Music' : id === 'youtube' ? 'YouTube' : 'Spotify'}
+        {id === 'youtube' ? 'YouTube' : 'Spotify'}
           </Button>
         ))}
       </View>
-      {selected && !selected.enabled ? (
-        <ErrorBanner message={selected.unavailableReason ?? 'This provider is not available.'} />
+      {selected && !selected.connected ? (
+        <ErrorBanner message={`Connect ${selected.name} in Settings before creating a playlist there.`} />
       ) : null}
       {create.isError ? <ErrorBanner message={toUserMessage(create.error)} /> : null}
 
       <Button
         mode="contained"
-        disabled={!name.trim() || create.isPending}
+        disabled={!name.trim() || create.isPending || selected?.connected === false}
         onPress={async () => {
           const playlist = await create.mutateAsync({
             name: name.trim(),
@@ -95,6 +95,7 @@ export function CreatePlaylistScreen() {
             yearFrom: yearFrom ? Number(yearFrom) : undefined,
             yearTo: yearTo ? Number(yearTo) : undefined,
             targetDurationMs: duration ? Number(duration) * 60_000 : undefined,
+            targetProvider: provider,
           });
           router.push(`/playlist/${playlist.playlist.id}`);
         }}

@@ -90,6 +90,7 @@ function mapTrack(track: SpotifyTrack): TrackResult {
   return {
     provider: 'spotify',
     providerTrackId: track.id,
+    spotifyId: track.id,
     title: track.name,
     artist,
     album: track.album.name,
@@ -346,6 +347,37 @@ export class SpotifyProvider implements MusicProvider {
         insert_before: input.insertBefore,
         range_length: input.rangeLength ?? 1,
       }),
+    });
+  }
+
+  async updatePlaylist(
+    tokens: ProviderTokens,
+    playlistId: string,
+    input: { name?: string; description?: string },
+  ): Promise<PlaylistResult> {
+    const accessToken = requireAccessToken(tokens.accessToken);
+    const playlist = await providerJson<SpotifyPlaylistResponse>(`${SPOTIFY_API}/playlists/${playlistId}`, {
+      method: 'PUT',
+      headers: bearerHeaders(accessToken, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify({
+        name: input.name,
+        description: input.description,
+      }),
+    });
+    return {
+      provider: 'spotify',
+      providerPlaylistId: playlist.id,
+      name: playlist.name,
+      description: playlist.description ?? undefined,
+      coverImageUrl: playlist.images?.[0]?.url,
+    };
+  }
+
+  async deletePlaylist(tokens: ProviderTokens, playlistId: string): Promise<void> {
+    const accessToken = requireAccessToken(tokens.accessToken);
+    await providerJson(`${SPOTIFY_API}/playlists/${playlistId}/followers`, {
+      method: 'DELETE',
+      headers: bearerHeaders(accessToken),
     });
   }
 

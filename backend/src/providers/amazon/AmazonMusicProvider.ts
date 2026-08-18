@@ -94,6 +94,18 @@ export class AmazonMusicProvider implements MusicProvider {
     return Promise.reject(this.unavailable());
   }
 
+  updatePlaylist(
+    _tokens: ProviderTokens,
+    _playlistId: string,
+    _input: { name?: string; description?: string },
+  ): Promise<PlaylistResult> {
+    return Promise.reject(this.unavailable());
+  }
+
+  deletePlaylist(_tokens: ProviderTokens, _playlistId: string): Promise<void> {
+    return Promise.reject(this.unavailable());
+  }
+
   private unavailable(): ProviderUnavailableError | ConfigurationError {
     if (this.isEnabled()) {
       return new ConfigurationError(

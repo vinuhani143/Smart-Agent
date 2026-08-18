@@ -1,5 +1,12 @@
 import { getEnv } from '../../config/env';
-import { ConfigurationError, OAuthFailedError, TokenInvalidError } from '../../types/errors';
+import {
+  ConfigurationError,
+  DuplicateTrackError,
+  NotFoundError,
+  OperationNotSupportedError,
+  TokenInvalidError,
+  TrackUnavailableError,
+} from '../../types/errors';
 import type {
   AuthorizationRequest,
   CreatePlaylistInput,
@@ -11,93 +18,112 @@ import type {
   ReorderPlaylistInput,
   SearchTracksParams,
   TrackResult,
+  UpdatePlaylistInput,
 } from '../../types/provider';
 import { bearerHeaders, providerJson, requireAccessToken } from '../http';
+import { parseIsoDurationMs, parseYouTubeTitle } from './parseYouTubeTitle';
+import {
+  buildYouTubePlaylistInsertBody,
+  mapGoogleTokenResponse,
+  YOUTUBE_OAUTH_SCOPES,
+  type GoogleTokenResponse,
+  youtubeInsertPosition,
+} from './youtubeAuth';
 
 const GOOGLE_AUTHORIZE = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN = 'https://oauth2.googleapis.com/token';
 const GOOGLE_REVOKE = 'https://oauth2.googleapis.com/revoke';
-const GOOGLE_USERINFO = 'https://openidconnect.googleapis.com/v1/userinfo';
 const YOUTUBE_API = 'https://www.googleapis.com/youtube/v3';
 
-const GOOGLE_SCOPES = [
-  'openid',
-  'email',
-  'profile',
-  'https://www.googleapis.com/auth/youtube',
-].join(' ');
-
-interface GoogleTokenResponse {
-  access_token: string;
-  expires_in: number;
-  refresh_token?: string;
-  scope?: string;
-  token_type: string;
-  error?: string;
-}
-
-interface GoogleUserInfo {
-  sub: string;
-  name?: string;
-  email?: string;
-  picture?: string;
-}
-
 interface YouTubeSearchItem {
-  id: { videoId?: string };
-  snippet: {
-    title: string;
-    channelTitle: string;
-    publishedAt: string;
-    thumbnails?: { high?: { url: string }; default?: { url: string } };
+  id?: { videoId?: string; kind?: string };
+  snippet?: {
+    title?: string;
+    channelTitle?: string;
+    publishedAt?: string;
+    thumbnails?: { high?: { url: string }; medium?: { url: string }; default?: { url: string } };
   };
 }
 
 interface YouTubeVideoItem {
   id: string;
-  snippet: {
-    title: string;
-    channelTitle: string;
-    publishedAt: string;
-    thumbnails?: { high?: { url: string }; default?: { url: string } };
+  snippet?: {
+    title?: string;
+    channelTitle?: string;
+    publishedAt?: string;
+    thumbnails?: { high?: { url: string }; medium?: { url: string }; default?: { url: string } };
   };
   contentDetails?: { duration?: string };
+  status?: { privacyStatus?: string; embeddable?: boolean };
 }
 
-interface YouTubePlaylistItem {
+interface YouTubePlaylistResource {
   id: string;
-  snippet: {
-    title: string;
+  snippet?: {
+    title?: string;
     description?: string;
     channelTitle?: string;
-    thumbnails?: { high?: { url: string }; default?: { url: string } };
+    thumbnails?: { high?: { url: string }; medium?: { url: string }; default?: { url: string } };
   };
   contentDetails?: { itemCount?: number };
 }
 
-function parseIsoDurationMs(value: string | undefined): number | undefined {
-  if (!value) {
-    return undefined;
-  }
-  const match = /PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/.exec(value);
-  if (!match) {
-    return undefined;
-  }
-  const hours = Number(match[1] ?? 0);
-  const minutes = Number(match[2] ?? 0);
-  const seconds = Number(match[3] ?? 0);
-  return ((hours * 60 + minutes) * 60 + seconds) * 1000;
+interface YouTubePlaylistItemResource {
+  id: string;
+  snippet?: {
+    title?: string;
+    position?: number;
+    resourceId?: { kind?: string; videoId?: string };
+  };
+  contentDetails?: { videoId?: string; videoPublishedAt?: string };
+  status?: { privacyStatus?: string };
+}
+
+interface YouTubeChannelResource {
+  id: string;
+  snippet?: {
+    title?: string;
+    thumbnails?: { high?: { url: string }; default?: { url: string } };
+  };
+}
+
+function thumbnailUrl(thumbnails?: {
+  high?: { url: string };
+  medium?: { url: string };
+  default?: { url: string };
+}): string | undefined {
+  return thumbnails?.high?.url ?? thumbnails?.medium?.url ?? thumbnails?.default?.url;
 }
 
 function mapVideo(item: YouTubeVideoItem): TrackResult {
+  const rawTitle = item.snippet?.title ?? 'Untitled video';
+  const channelTitle = item.snippet?.channelTitle ?? '';
+  const parsed = parseYouTubeTitle(rawTitle, channelTitle);
   return {
     provider: 'youtube',
     providerTrackId: item.id,
-    title: item.snippet.title,
-    artist: item.snippet.channelTitle,
+    youtubeVideoId: item.id,
+    title: parsed.title,
+    artist: parsed.artist,
     durationMs: parseIsoDurationMs(item.contentDetails?.duration),
-    releaseDate: item.snippet.publishedAt,
-    thumbnailUrl: item.snippet.thumbnails?.high?.url ?? item.snippet.thumbnails?.default?.url,
+    releaseDate: item.snippet?.publishedAt,
+    thumbnailUrl: thumbnailUrl(item.snippet?.thumbnails),
+    originalTitle: parsed.originalTitle,
+    metadataConfidence: parsed.confidence,
+    parsedTitle: parsed.parsedTitle,
+    parsedArtist: parsed.parsedArtist,
+  };
+}
+
+function mapPlaylist(playlist: YouTubePlaylistResource): PlaylistResult {
+  return {
+    provider: 'youtube',
+    providerPlaylistId: playlist.id,
+    name: playlist.snippet?.title ?? 'Untitled playlist',
+    description: playlist.snippet?.description,
+    coverImageUrl: thumbnailUrl(playlist.snippet?.thumbnails),
+    trackCount: playlist.contentDetails?.itemCount,
+    ownerName: playlist.snippet?.channelTitle,
   };
 }
 
@@ -138,6 +164,21 @@ function applyLocalFilters(tracks: TrackResult[], params: SearchTracksParams): T
   });
 }
 
+function youtubeAuth(
+  accessToken: string | undefined,
+  apiKey: string | undefined,
+): { headers: Record<string, string>; query: URLSearchParams } {
+  if (accessToken) {
+    return { headers: bearerHeaders(accessToken), query: new URLSearchParams() };
+  }
+  if (apiKey) {
+    const query = new URLSearchParams();
+    query.set('key', apiKey);
+    return { headers: {}, query };
+  }
+  return { headers: {}, query: new URLSearchParams() };
+}
+
 export class YouTubeProvider implements MusicProvider {
   readonly id: ProviderId = 'youtube';
   readonly displayName = 'YouTube';
@@ -153,11 +194,11 @@ export class YouTubeProvider implements MusicProvider {
     url.searchParams.set('client_id', env.GOOGLE_CLIENT_ID);
     url.searchParams.set('redirect_uri', env.GOOGLE_REDIRECT_URI);
     url.searchParams.set('response_type', 'code');
-    url.searchParams.set('scope', GOOGLE_SCOPES);
+    url.searchParams.set('scope', YOUTUBE_OAUTH_SCOPES.join(' '));
     url.searchParams.set('state', state);
     url.searchParams.set('access_type', 'offline');
     url.searchParams.set('prompt', 'consent');
-    url.searchParams.set('include_granted_scopes', 'true');
+    url.searchParams.set('include_granted_scopes', 'false');
     if (codeChallenge) {
       url.searchParams.set('code_challenge_method', 'S256');
       url.searchParams.set('code_challenge', codeChallenge);
@@ -172,12 +213,17 @@ export class YouTubeProvider implements MusicProvider {
   }
 
   async logout(tokens: ProviderTokens): Promise<void> {
-    const body = new URLSearchParams({ token: tokens.accessToken });
-    await providerJson(GOOGLE_REVOKE, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body,
-    }).catch(() => undefined);
+    const token = tokens.refreshToken ?? tokens.accessToken;
+    const body = new URLSearchParams({ token });
+    try {
+      await providerJson(GOOGLE_REVOKE, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body,
+      });
+    } catch {
+      // Revoke is best-effort so disconnect still succeeds if Google already invalidated the token.
+    }
   }
 
   async refreshAccessToken(tokens: ProviderTokens): Promise<ProviderTokens> {
@@ -196,19 +242,25 @@ export class YouTubeProvider implements MusicProvider {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body,
     });
-    return this.toTokens(response, tokens.refreshToken);
+    return mapGoogleTokenResponse(response, tokens.refreshToken);
   }
 
   async getCurrentUser(tokens: ProviderTokens): Promise<ProviderUser> {
     const accessToken = requireAccessToken(tokens.accessToken);
-    const profile = await providerJson<GoogleUserInfo>(GOOGLE_USERINFO, {
-      headers: bearerHeaders(accessToken),
-    });
+    const data = await providerJson<{ items?: YouTubeChannelResource[] }>(
+      `${YOUTUBE_API}/channels?part=snippet&mine=true`,
+      { headers: bearerHeaders(accessToken) },
+    );
+    const channel = data.items?.[0];
+    if (!channel) {
+      throw new TokenInvalidError(
+        'This Google account does not have a YouTube channel. Create one on YouTube, then reconnect.',
+      );
+    }
     return {
-      id: profile.sub,
-      displayName: profile.name ?? profile.email ?? profile.sub,
-      email: profile.email,
-      imageUrl: profile.picture,
+      id: channel.id,
+      displayName: channel.snippet?.title ?? channel.id,
+      imageUrl: channel.snippet?.thumbnails?.high?.url ?? channel.snippet?.thumbnails?.default?.url,
     };
   }
 
@@ -224,30 +276,31 @@ export class YouTubeProvider implements MusicProvider {
     url.searchParams.set('part', 'snippet');
     url.searchParams.set('type', 'video');
     url.searchParams.set('videoCategoryId', '10');
-    url.searchParams.set('maxResults', String(params.limit ?? 20));
+    url.searchParams.set('maxResults', String(Math.min(params.limit ?? 20, 50)));
     url.searchParams.set('q', queryParts.join(' '));
     const duration = durationFilterParam(params);
     if (duration) {
       url.searchParams.set('videoDuration', duration);
     }
-
     const accessToken = tokens?.accessToken;
-    if (accessToken) {
-      url.searchParams.set('access_token', accessToken);
-    } else if (env.YOUTUBE_API_KEY) {
-      url.searchParams.set('key', env.YOUTUBE_API_KEY);
-    } else {
+    const auth = youtubeAuth(accessToken, env.YOUTUBE_API_KEY || undefined);
+    if (!accessToken && !env.YOUTUBE_API_KEY) {
       throw new TokenInvalidError('Connect YouTube or configure YOUTUBE_API_KEY to search.');
     }
+    for (const [key, value] of auth.query.entries()) {
+      url.searchParams.set(key, value);
+    }
 
-    const search = await providerJson<{ items?: YouTubeSearchItem[] }>(url.toString());
+    const search = await providerJson<{ items?: YouTubeSearchItem[] }>(url.toString(), {
+      headers: auth.headers,
+    });
     const ids = (search.items ?? [])
-      .map((item) => item.id.videoId)
+      .map((item) => item.id?.videoId)
       .filter((id): id is string => Boolean(id));
     if (ids.length === 0) {
       return [];
     }
-    const videos = await this.getVideos(ids, accessToken ?? undefined, env.YOUTUBE_API_KEY || undefined);
+    const videos = await this.getVideos(ids, accessToken, env.YOUTUBE_API_KEY || undefined);
     return applyLocalFilters(videos.map(mapVideo), params);
   }
 
@@ -260,7 +313,9 @@ export class YouTubeProvider implements MusicProvider {
     );
     const video = videos[0];
     if (!video) {
-      throw new TokenInvalidError('YouTube could not find that video.');
+      throw new TrackUnavailableError(
+        'This YouTube video is unavailable, private, or was deleted.',
+      );
     }
     return mapVideo(video);
   }
@@ -270,100 +325,121 @@ export class YouTubeProvider implements MusicProvider {
     playlistId: string,
   ): Promise<PlaylistResult & { tracks: TrackResult[] }> {
     const accessToken = requireAccessToken(tokens.accessToken);
-    const playlists = await providerJson<{ items?: YouTubePlaylistItem[] }>(
-      `${YOUTUBE_API}/playlists?part=snippet,contentDetails&id=${encodeURIComponent(playlistId)}`,
+    const playlists = await providerJson<{ items?: YouTubePlaylistResource[] }>(
+      `${YOUTUBE_API}/playlists?part=snippet,contentDetails,status&id=${encodeURIComponent(playlistId)}`,
       { headers: bearerHeaders(accessToken) },
     );
     const playlist = playlists.items?.[0];
     if (!playlist) {
-      throw new TokenInvalidError('YouTube playlist was not found.');
+      throw new NotFoundError('That YouTube playlist was not found.');
     }
 
-    const videoIds: string[] = [];
-    let pageToken: string | undefined;
-    do {
-      const pageUrl = new URL(`${YOUTUBE_API}/playlistItems`);
-      pageUrl.searchParams.set('part', 'contentDetails');
-      pageUrl.searchParams.set('playlistId', playlistId);
-      pageUrl.searchParams.set('maxResults', '50');
-      if (pageToken) {
-        pageUrl.searchParams.set('pageToken', pageToken);
-      }
-      const page = await providerJson<{
-        items?: Array<{ contentDetails?: { videoId?: string } }>;
-        nextPageToken?: string;
-      }>(pageUrl.toString(), { headers: bearerHeaders(accessToken) });
-      for (const item of page.items ?? []) {
-        if (item.contentDetails?.videoId) {
-          videoIds.push(item.contentDetails.videoId);
-        }
-      }
-      pageToken = page.nextPageToken;
-    } while (pageToken);
+    const items = await this.listPlaylistItems(accessToken, playlistId);
+    const videoIds = items
+      .map((item) => item.contentDetails?.videoId ?? item.snippet?.resourceId?.videoId)
+      .filter((id): id is string => Boolean(id));
 
     const tracks: TrackResult[] = [];
     for (let i = 0; i < videoIds.length; i += 50) {
       const chunk = videoIds.slice(i, i + 50);
       const videos = await this.getVideos(chunk, accessToken, undefined);
-      tracks.push(...videos.map(mapVideo));
+      const byId = new Map(videos.map((video) => [video.id, mapVideo(video)]));
+      for (const id of chunk) {
+        const mapped = byId.get(id);
+        if (mapped) {
+          tracks.push(mapped);
+        }
+      }
     }
 
-    return {
-      provider: 'youtube',
-      providerPlaylistId: playlist.id,
-      name: playlist.snippet.title,
-      description: playlist.snippet.description,
-      coverImageUrl: playlist.snippet.thumbnails?.high?.url ?? playlist.snippet.thumbnails?.default?.url,
-      trackCount: playlist.contentDetails?.itemCount,
-      ownerName: playlist.snippet.channelTitle,
-      tracks,
-    };
+    return { ...mapPlaylist(playlist), tracks };
   }
 
   async getUserPlaylists(tokens: ProviderTokens): Promise<PlaylistResult[]> {
     const accessToken = requireAccessToken(tokens.accessToken);
-    const data = await providerJson<{ items?: YouTubePlaylistItem[] }>(
-      `${YOUTUBE_API}/playlists?part=snippet,contentDetails&mine=true&maxResults=50`,
-      { headers: bearerHeaders(accessToken) },
-    );
-    return (data.items ?? []).map((playlist) => ({
-      provider: 'youtube' as const,
-      providerPlaylistId: playlist.id,
-      name: playlist.snippet.title,
-      description: playlist.snippet.description,
-      coverImageUrl: playlist.snippet.thumbnails?.high?.url ?? playlist.snippet.thumbnails?.default?.url,
-      trackCount: playlist.contentDetails?.itemCount,
-      ownerName: playlist.snippet.channelTitle,
-    }));
+    const playlists: PlaylistResult[] = [];
+    let pageToken: string | undefined;
+    do {
+      const url = new URL(`${YOUTUBE_API}/playlists`);
+      url.searchParams.set('part', 'snippet,contentDetails,status');
+      url.searchParams.set('mine', 'true');
+      url.searchParams.set('maxResults', '50');
+      if (pageToken) {
+        url.searchParams.set('pageToken', pageToken);
+      }
+      const page = await providerJson<{ items?: YouTubePlaylistResource[]; nextPageToken?: string }>(
+        url.toString(),
+        { headers: bearerHeaders(accessToken) },
+      );
+      for (const playlist of page.items ?? []) {
+        playlists.push(mapPlaylist(playlist));
+      }
+      pageToken = page.nextPageToken;
+    } while (pageToken);
+    return playlists;
   }
 
   async createPlaylist(tokens: ProviderTokens, input: CreatePlaylistInput): Promise<PlaylistResult> {
     const accessToken = requireAccessToken(tokens.accessToken);
-    const playlist = await providerJson<YouTubePlaylistItem>(`${YOUTUBE_API}/playlists?part=snippet,status`, {
-      method: 'POST',
+    const playlist = await providerJson<YouTubePlaylistResource>(
+      `${YOUTUBE_API}/playlists?part=snippet,status,contentDetails`,
+      {
+        method: 'POST',
+        headers: bearerHeaders(accessToken, { 'Content-Type': 'application/json' }),
+        body: JSON.stringify(buildYouTubePlaylistInsertBody(input)),
+      },
+    );
+    return mapPlaylist(playlist);
+  }
+
+  async updatePlaylist(
+    tokens: ProviderTokens,
+    playlistId: string,
+    input: UpdatePlaylistInput,
+  ): Promise<PlaylistResult> {
+    const accessToken = requireAccessToken(tokens.accessToken);
+    const existing = await providerJson<{ items?: YouTubePlaylistResource[] }>(
+      `${YOUTUBE_API}/playlists?part=snippet,status,contentDetails&id=${encodeURIComponent(playlistId)}`,
+      { headers: bearerHeaders(accessToken) },
+    );
+    const current = existing.items?.[0];
+    if (!current) {
+      throw new NotFoundError('That YouTube playlist was not found.');
+    }
+    const playlist = await providerJson<YouTubePlaylistResource>(`${YOUTUBE_API}/playlists?part=snippet,status`, {
+      method: 'PUT',
       headers: bearerHeaders(accessToken, { 'Content-Type': 'application/json' }),
       body: JSON.stringify({
+        id: playlistId,
         snippet: {
-          title: input.name,
-          description: input.description ?? '',
-        },
-        status: {
-          privacyStatus: input.isPublic ? 'public' : 'private',
+          title: input.name ?? current.snippet?.title ?? 'Playlist',
+          description: input.description ?? current.snippet?.description ?? '',
         },
       }),
     });
-    return {
-      provider: 'youtube',
-      providerPlaylistId: playlist.id,
-      name: playlist.snippet.title,
-      description: playlist.snippet.description,
-      coverImageUrl: playlist.snippet.thumbnails?.high?.url,
-    };
+    return mapPlaylist(playlist);
+  }
+
+  async deletePlaylist(tokens: ProviderTokens, playlistId: string): Promise<void> {
+    const accessToken = requireAccessToken(tokens.accessToken);
+    await providerJson(`${YOUTUBE_API}/playlists?id=${encodeURIComponent(playlistId)}`, {
+      method: 'DELETE',
+      headers: bearerHeaders(accessToken),
+    });
   }
 
   async addTracksToPlaylist(tokens: ProviderTokens, playlistId: string, trackIds: string[]): Promise<void> {
     const accessToken = requireAccessToken(tokens.accessToken);
+    const existing = await this.listPlaylistItems(accessToken, playlistId);
+    const already = new Set(
+      existing
+        .map((item) => item.contentDetails?.videoId ?? item.snippet?.resourceId?.videoId)
+        .filter((id): id is string => Boolean(id)),
+    );
     for (const videoId of trackIds) {
+      if (already.has(videoId)) {
+        throw new DuplicateTrackError('That YouTube video is already in this playlist.');
+      }
       await providerJson(`${YOUTUBE_API}/playlistItems?part=snippet`, {
         method: 'POST',
         headers: bearerHeaders(accessToken, { 'Content-Type': 'application/json' }),
@@ -377,6 +453,7 @@ export class YouTubeProvider implements MusicProvider {
           },
         }),
       });
+      already.add(videoId);
     }
   }
 
@@ -386,31 +463,85 @@ export class YouTubeProvider implements MusicProvider {
     trackIds: string[],
   ): Promise<void> {
     const accessToken = requireAccessToken(tokens.accessToken);
-    const page = await providerJson<{
-      items?: Array<{ id: string; contentDetails?: { videoId?: string } }>;
-    }>(
-      `${YOUTUBE_API}/playlistItems?part=id,contentDetails&playlistId=${encodeURIComponent(playlistId)}&maxResults=50`,
-      { headers: bearerHeaders(accessToken) },
-    );
     const wanted = new Set(trackIds);
-    for (const item of page.items ?? []) {
-      if (item.contentDetails?.videoId && wanted.has(item.contentDetails.videoId)) {
+    const items = await this.listPlaylistItems(accessToken, playlistId);
+    let removed = 0;
+    for (const item of items) {
+      const videoId = item.contentDetails?.videoId ?? item.snippet?.resourceId?.videoId;
+      if (videoId && wanted.has(videoId)) {
         await providerJson(`${YOUTUBE_API}/playlistItems?id=${encodeURIComponent(item.id)}`, {
           method: 'DELETE',
           headers: bearerHeaders(accessToken),
         });
+        removed += 1;
       }
+    }
+    if (removed === 0) {
+      throw new NotFoundError('That video is not in this YouTube playlist.');
     }
   }
 
   async reorderPlaylist(
-    _tokens: ProviderTokens,
-    _playlistId: string,
-    _input: ReorderPlaylistInput,
+    tokens: ProviderTokens,
+    playlistId: string,
+    input: ReorderPlaylistInput,
   ): Promise<void> {
-    throw new ConfigurationError(
-      'YouTube playlist reorder requires playlistItems.update with position; not enabled in this skeleton.',
-    );
+    const rangeLength = input.rangeLength ?? 1;
+    if (rangeLength !== 1) {
+      throw new OperationNotSupportedError(
+        'YouTube playlist reorder supports moving one video at a time. Multi-item range moves are not supported because each YouTube playlistItems.update costs quota and a partial update could leave the playlist inconsistent.',
+      );
+    }
+    const accessToken = requireAccessToken(tokens.accessToken);
+    const items = await this.listPlaylistItems(accessToken, playlistId);
+    const item = items[input.rangeStart];
+    if (!item) {
+      throw new NotFoundError('There is no video at that playlist position.');
+    }
+    const videoId = item.contentDetails?.videoId ?? item.snippet?.resourceId?.videoId;
+    if (!videoId) {
+      throw new TrackUnavailableError('That playlist item no longer has a video id.');
+    }
+    const position = youtubeInsertPosition(input.rangeStart, input.insertBefore);
+    await providerJson(`${YOUTUBE_API}/playlistItems?part=snippet`, {
+      method: 'PUT',
+      headers: bearerHeaders(accessToken, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify({
+        id: item.id,
+        snippet: {
+          playlistId,
+          position,
+          resourceId: {
+            kind: 'youtube#video',
+            videoId,
+          },
+        },
+      }),
+    });
+  }
+
+  private async listPlaylistItems(
+    accessToken: string,
+    playlistId: string,
+  ): Promise<YouTubePlaylistItemResource[]> {
+    const items: YouTubePlaylistItemResource[] = [];
+    let pageToken: string | undefined;
+    do {
+      const url = new URL(`${YOUTUBE_API}/playlistItems`);
+      url.searchParams.set('part', 'snippet,contentDetails,status');
+      url.searchParams.set('playlistId', playlistId);
+      url.searchParams.set('maxResults', '50');
+      if (pageToken) {
+        url.searchParams.set('pageToken', pageToken);
+      }
+      const page = await providerJson<{ items?: YouTubePlaylistItemResource[]; nextPageToken?: string }>(
+        url.toString(),
+        { headers: bearerHeaders(accessToken) },
+      );
+      items.push(...(page.items ?? []));
+      pageToken = page.nextPageToken;
+    } while (pageToken);
+    return items;
   }
 
   private async getVideos(
@@ -418,17 +549,22 @@ export class YouTubeProvider implements MusicProvider {
     accessToken: string | undefined,
     apiKey: string | undefined,
   ): Promise<YouTubeVideoItem[]> {
+    if (ids.length === 0) {
+      return [];
+    }
     const url = new URL(`${YOUTUBE_API}/videos`);
-    url.searchParams.set('part', 'snippet,contentDetails');
+    url.searchParams.set('part', 'snippet,contentDetails,status');
     url.searchParams.set('id', ids.join(','));
-    if (accessToken) {
-      url.searchParams.set('access_token', accessToken);
-    } else if (apiKey) {
-      url.searchParams.set('key', apiKey);
-    } else {
+    const auth = youtubeAuth(accessToken, apiKey);
+    if (!accessToken && !apiKey) {
       throw new TokenInvalidError('Connect YouTube to load video details.');
     }
-    const data = await providerJson<{ items?: YouTubeVideoItem[] }>(url.toString());
+    for (const [key, value] of auth.query.entries()) {
+      url.searchParams.set(key, value);
+    }
+    const data = await providerJson<{ items?: YouTubeVideoItem[] }>(url.toString(), {
+      headers: auth.headers,
+    });
     return data.items ?? [];
   }
 
@@ -449,19 +585,7 @@ export class YouTubeProvider implements MusicProvider {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body,
     });
-    if (response.error) {
-      throw new OAuthFailedError('Google did not accept the authorization code.');
-    }
-    return this.toTokens(response);
-  }
-
-  private toTokens(response: GoogleTokenResponse, fallbackRefresh?: string): ProviderTokens {
-    return {
-      accessToken: response.access_token,
-      refreshToken: response.refresh_token ?? fallbackRefresh,
-      expiresAt: new Date(Date.now() + response.expires_in * 1000),
-      scopes: response.scope,
-    };
+    return mapGoogleTokenResponse(response);
   }
 
   private requireConfig() {

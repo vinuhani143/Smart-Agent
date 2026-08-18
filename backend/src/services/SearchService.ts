@@ -2,6 +2,7 @@ import { prisma } from '../config/prisma';
 import { NoSearchResultsError, TokenInvalidError } from '../types/errors';
 import type { ProviderId, SearchTracksParams, TrackResult } from '../types/provider';
 import { fromPrismaProvider, getProvider } from '../providers/ProviderRegistry';
+import { isNonRetryableProviderError } from '../providers/youtube/youtubeErrors';
 import { listConnectedProviders, withProviderTokens } from './TokenService';
 
 export async function searchProvider(
@@ -35,13 +36,23 @@ export async function searchConnectedProviders(
     throw new TokenInvalidError('Connect a music service in Settings before searching.');
   }
 
+  const errors: unknown[] = [];
   const groups = await Promise.all(
     providerIds.map(async (provider) => {
       try {
         return await withProviderTokens(userId, provider, (tokens) =>
           getProvider(provider).searchTracks(tokens, params),
         );
-      } catch {
+      } catch (error) {
+        if (restrictTo?.length === 1 || isNonRetryableProviderError(error)) {
+          if (restrictTo?.length === 1) {
+            throw error;
+          }
+        }
+        errors.push(error);
+        if (isNonRetryableProviderError(error) && providerIds.length === 1) {
+          throw error;
+        }
         return [] as TrackResult[];
       }
     }),
@@ -49,6 +60,10 @@ export async function searchConnectedProviders(
 
   const merged = groups.flat();
   if (merged.length === 0) {
+    const quota = errors.find((error) => isNonRetryableProviderError(error));
+    if (quota) {
+      throw quota;
+    }
     throw new NoSearchResultsError(params.query);
   }
   return merged;

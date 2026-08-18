@@ -9,15 +9,27 @@ interface ProviderCardProps {
   onConnect?: () => void;
   onDisconnect?: () => void;
   busy?: boolean;
+  connectLabel?: string;
+  disconnectLabel?: string;
 }
 
-export function ProviderCard({ provider, onConnect, onDisconnect, busy }: ProviderCardProps) {
+export function ProviderCard({
+  provider,
+  onConnect,
+  onDisconnect,
+  busy,
+  connectLabel,
+  disconnectLabel,
+}: ProviderCardProps) {
   const meta = providerMeta[provider.id];
   const statusLabel = !provider.enabled
     ? 'Not available'
     : provider.connected
       ? 'Connected'
       : 'Not Connected';
+  const actionLabel = provider.connected
+    ? (disconnectLabel ?? 'Disconnect')
+    : (connectLabel ?? 'Connect');
 
   return (
     <View style={styles.card}>
@@ -27,6 +39,9 @@ export function ProviderCard({ provider, onConnect, onDisconnect, busy }: Provid
       <View style={styles.copy}>
         <Text style={styles.name}>{meta.label}</Text>
         <Text style={[styles.status, provider.connected && styles.connected]}>{statusLabel}</Text>
+        {provider.connected && provider.displayName ? (
+          <Text style={styles.reason}>{provider.displayName}</Text>
+        ) : null}
         {provider.unavailableReason && !provider.enabled ? (
           <Text style={styles.reason}>{provider.unavailableReason}</Text>
         ) : null}
@@ -37,7 +52,7 @@ export function ProviderCard({ provider, onConnect, onDisconnect, busy }: Provid
           disabled={busy}
           style={[styles.button, provider.connected && styles.buttonGhost]}
         >
-          <Text style={styles.buttonText}>{provider.connected ? 'Disconnect' : 'Connect'}</Text>
+          <Text style={styles.buttonText}>{actionLabel}</Text>
         </Pressable>
       ) : null}
     </View>

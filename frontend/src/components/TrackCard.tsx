@@ -32,10 +32,13 @@ export function TrackCard({ track, onAdd, onRemove, confidence }: TrackCardProps
           {track.artist}
         </Text>
         <Text style={styles.meta} numberOfLines={1}>
-          {[track.album, formatDuration(track.durationMs)].filter(Boolean).join(' · ')}
+          {[formatDuration(track.durationMs), meta.label].filter(Boolean).join(' · ')}
         </Text>
         {confidence !== undefined ? (
           <Text style={styles.confidence}>Match confidence: {confidence}%</Text>
+        ) : null}
+        {track.metadataConfidence !== undefined && track.metadataConfidence < 80 ? (
+          <Text style={styles.confidence}>Title/artist confidence: {track.metadataConfidence}%</Text>
         ) : null}
       </View>
       <View style={styles.actions}>

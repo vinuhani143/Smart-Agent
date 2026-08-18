@@ -12,7 +12,7 @@ interface UiState {
 }
 
 export const useUiStore = create<UiState>((set) => ({
-  filters: { duration: 'any' },
+  filters: { duration: 'any', provider: 'all' },
   setFilters: (filters) => set({ filters }),
   addTargetPlaylistId: null,
   setAddTargetPlaylistId: (id) => set({ addTargetPlaylistId: id }),

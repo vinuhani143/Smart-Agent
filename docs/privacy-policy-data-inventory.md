@@ -14,6 +14,7 @@
 | AI prompt, parsed intent, candidate metadata | Preview generation | Until account delete | Prompt sent to the configured LLM if AI is enabled | Optional | Cascade on user delete |
 | OAuth CSRF state + encrypted PKCE verifier | Complete login | ~10 minutes | No | During connect | Deleted after use or expiry |
 | App diagnostics | Request id in API logs | Log retention of the host | No secrets in logs by design | Operational | Host log policy; not a user export |
+| Spotify email (OAuth scope) | Requested from Spotify for profile; **not persisted** in MusicMix tables | Transient during connect | Spotify only during OAuth | No | Not stored |
 
 Not stored: copyrighted audio, payment cards, contacts, advertising IDs, provider client secrets (process env only).
 

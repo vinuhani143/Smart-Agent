@@ -1,0 +1,23 @@
+{
+  "name": "musicmix",
+  "private": true,
+  "description": "MusicMix — universal music playlist manager (Expo + Express)",
+  "scripts": {
+    "typecheck": "npm run typecheck --prefix backend && npm run typecheck --prefix frontend",
+    "backend:dev": "npm run dev --prefix backend",
+    "backend:build": "npm run build --prefix backend",
+    "frontend:start": "npm start --prefix frontend",
+    "frontend:android": "npm run android --prefix frontend",
+    "prisma:generate": "npm run prisma:generate --prefix backend",
+    "prisma:migrate": "npm run prisma:migrate --prefix backend"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "prisma": "^6.16.3"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.16.3"
+  }
+}

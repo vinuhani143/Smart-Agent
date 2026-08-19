@@ -1,3 +1,14 @@
+/** Hostnames used in docs/EAS until a real Render origin exists. Not a live API. */
+const PLACEHOLDER_API_HOST =
+  /YOUR[-_]?RENDER[-_]?SERVICE|YOUR[-_]?REAL[-_]?RENDER[-_]?URL|YOUR_PRODUCTION_BACKEND_DOMAIN|YOUR_REAL_BACKEND_DOMAIN/i;
+
+export const API_NOT_CONFIGURED_MESSAGE =
+  'MusicMix cannot reach its server. This install still uses a placeholder API address, so search, AI, and playlists will not work until you deploy the backend and rebuild the app with that HTTPS URL.';
+
+export function isPlaceholderApiUrl(url: string): boolean {
+  return PLACEHOLDER_API_HOST.test(url.trim());
+}
+
 export function isReleaseBuild(env: {
   nodeEnv?: string;
   devFlag?: boolean;

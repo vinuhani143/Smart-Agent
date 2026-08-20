@@ -88,6 +88,7 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}, isRetry 
   if (token) {
     headers.set('Authorization', `Bearer ${token}`);
   }
+  headers.set('Cache-Control', 'no-store');
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);

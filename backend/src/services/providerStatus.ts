@@ -12,6 +12,29 @@ export function spotifyConfigStatus(): ConfigFlag {
     : 'not_configured';
 }
 
+export function describePublicRedirect(uri: string): {
+  configured: boolean;
+  https: boolean;
+  localhost: boolean;
+  path: string | null;
+} {
+  const raw = uri.trim();
+  if (!raw) {
+    return { configured: false, https: false, localhost: false, path: null };
+  }
+  try {
+    const parsed = new URL(raw);
+    return {
+      configured: true,
+      https: parsed.protocol === 'https:',
+      localhost: /localhost|127\.0\.0\.1|0\.0\.0\.0|10\.0\.2\.2/i.test(parsed.hostname),
+      path: parsed.pathname,
+    };
+  } catch {
+    return { configured: true, https: false, localhost: false, path: null };
+  }
+}
+
 export function youtubeConfigStatus(): ConfigFlag {
   const env = getEnv();
   return env.GOOGLE_CLIENT_ID.trim() && env.GOOGLE_CLIENT_SECRET.trim() && env.GOOGLE_REDIRECT_URI.trim()

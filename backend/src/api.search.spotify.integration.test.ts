@@ -13,6 +13,8 @@ import { resetEnvCache, loadEnv } from './config/env';
 import { prisma } from './config/prisma';
 import { createApp } from './app';
 import { saveMusicAccount } from './services/TokenService';
+import { TokenEncryptionService } from './services/TokenEncryptionService';
+import { toPkceChallenge } from './utils/crypto';
 
 resetEnvCache();
 const env = loadEnv();
@@ -273,5 +275,167 @@ describe('GET /api/search/spotify', () => {
     assert.match(String(error.message), /reconnect Spotify/i);
     assert.equal(String(error.message).toLowerCase().includes('search failed'), false);
     assertNoSecrets(raw);
+  });
+
+  it('searches Spotify for arijit singh with a valid access token', async () => {
+    const session = await createSession();
+    await connectSpotify(session.userId, {
+      accessToken: 'valid-access',
+      refreshToken: 'stored-refresh',
+      expiresAt: new Date(Date.now() + 30 * 60 * 1000),
+    });
+    installSpotifyFetchMock((url, init) => {
+      assert.equal(url.includes('/api/token'), false);
+      assert.match(url, /q=arijit(\+|%20)singh/i);
+      const headers = new Headers(init?.headers);
+      assert.equal(headers.get('authorization'), 'Bearer valid-access');
+      return jsonResponse(200, {
+        tracks: {
+          items: [
+            {
+              id: 'arijit-1',
+              name: 'Tum Hi Ho',
+              duration_ms: 261000,
+              explicit: false,
+              artists: [{ name: 'Arijit Singh' }],
+              album: { name: 'Aashiqui 2' },
+            },
+          ],
+        },
+      });
+    });
+
+    const { status, body, raw } = await json(`/api/search/spotify?q=${encodeURIComponent('arijit singh')}`, {
+      headers: { Authorization: `Bearer ${session.token}` },
+    });
+    assert.equal(status, 200, raw);
+    const tracks = body.tracks as Array<Record<string, unknown>>;
+    assert.equal(tracks.length, 1);
+    assert.equal(tracks[0]?.artist, 'Arijit Singh');
+    assertNoSecrets(raw);
+  });
+
+  it('returns reconnect 401 instead of empty-result 404 on GET /api/search when refresh fails', async () => {
+    const session = await createSession();
+    await connectSpotify(session.userId, {
+      accessToken: 'expired-access',
+      refreshToken: 'secret-refresh-token-value',
+      expiresAt: new Date(Date.now() - 60_000),
+    });
+    installSpotifyFetchMock((url) => {
+      if (url.includes('/api/token')) {
+        return jsonResponse(400, { error: 'invalid_grant' });
+      }
+      return jsonResponse(500, { error: 'search should not run' });
+    });
+
+    const { status, body, raw } = await json(`/api/search?q=${encodeURIComponent('arijit singh')}`, {
+      headers: { Authorization: `Bearer ${session.token}` },
+    });
+    assert.equal(status, 401, raw);
+    const error = body.error as Record<string, unknown>;
+    assert.equal(error.code, 'TOKEN_INVALID');
+    assert.match(String(error.message), /reconnect Spotify/i);
+    assert.equal(String(error.message).toLowerCase().includes('no songs matched'), false);
+    assertNoSecrets(raw);
+  });
+});
+
+describe('POST /api/auth/spotify/start and callback token exchange', () => {
+  it('stores the verifier that produced the S256 challenge on the authorize URL', async () => {
+    const session = await createSession();
+    const start = await json('/api/auth/spotify/start', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${session.token}` },
+    });
+    assert.equal(start.status, 200, start.raw);
+    const authorizationUrl = new URL(String(start.body.authorizationUrl));
+    const state = authorizationUrl.searchParams.get('state');
+    const challenge = authorizationUrl.searchParams.get('code_challenge');
+    assert.ok(state);
+    assert.ok(challenge);
+    assert.equal(authorizationUrl.searchParams.get('code_challenge_method'), 'S256');
+    assert.equal(
+      authorizationUrl.searchParams.get('redirect_uri'),
+      'http://localhost:4000/api/auth/spotify/callback',
+    );
+
+    const row = await prisma.oAuthState.findUnique({ where: { state } });
+    assert.ok(row?.codeVerifier);
+    const verifier = TokenEncryptionService.decrypt(row.codeVerifier);
+    assert.equal(toPkceChallenge(verifier), challenge);
+    assert.notEqual(verifier, challenge);
+    assert.equal(row.userId, session.userId);
+  });
+
+  it('POSTs the confidential-client token body using the stored verifier and preserves invalid_grant', async () => {
+    const session = await createSession();
+    const start = await json('/api/auth/spotify/start', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${session.token}` },
+    });
+    assert.equal(start.status, 200, start.raw);
+    const authorizationUrl = new URL(String(start.body.authorizationUrl));
+    const state = authorizationUrl.searchParams.get('state');
+    const challenge = authorizationUrl.searchParams.get('code_challenge');
+    const authorizeRedirect = authorizationUrl.searchParams.get('redirect_uri');
+    assert.ok(state);
+    const row = await prisma.oAuthState.findUnique({ where: { state } });
+    assert.ok(row?.codeVerifier);
+    const verifier = TokenEncryptionService.decrypt(row.codeVerifier);
+    assert.equal(toPkceChallenge(verifier), challenge);
+
+    let tokenRequest:
+      | { method?: string; contentType: string | null; auth: string | null; body: string }
+      | undefined;
+    installSpotifyFetchMock((url, init) => {
+      if (url === 'https://accounts.spotify.com/api/token') {
+        const headers = new Headers(init?.headers);
+        tokenRequest = {
+          method: init?.method,
+          contentType: headers.get('content-type'),
+          auth: headers.get('authorization'),
+          body:
+            typeof init?.body === 'string'
+              ? init.body
+              : init?.body instanceof URLSearchParams
+                ? init.body.toString()
+                : '',
+        };
+        return jsonResponse(400, {
+          error: 'invalid_grant',
+          error_description: 'Invalid authorization code',
+        });
+      }
+      return jsonResponse(500, { error: 'Spotify Web API should not be called' });
+    });
+
+    const response = await originalFetch(
+      `${base}/api/auth/spotify/callback?code=${encodeURIComponent('one-time-code')}&state=${encodeURIComponent(state)}`,
+      { redirect: 'manual' },
+    );
+    assert.equal(response.status, 302);
+    const location = response.headers.get('location') ?? '';
+    assert.match(location, /invalid_grant/);
+    assert.equal(location.includes('Check the provider credentials'), false);
+    assert.equal(location.includes('one-time-code'), false);
+    assert.equal(location.includes(verifier), false);
+    assert.equal(location.includes('spotify-client-secret'), false);
+
+    assert.ok(tokenRequest);
+    assert.equal(tokenRequest.method, 'POST');
+    assert.equal(tokenRequest.contentType, 'application/x-www-form-urlencoded');
+    assert.equal(
+      tokenRequest.auth,
+      `Basic ${Buffer.from('spotify-client-id:spotify-client-secret').toString('base64')}`,
+    );
+    const params = new URLSearchParams(tokenRequest.body);
+    assert.deepEqual([...params.keys()], ['grant_type', 'code', 'redirect_uri', 'code_verifier']);
+    assert.equal(params.get('grant_type'), 'authorization_code');
+    assert.equal(params.get('code'), 'one-time-code');
+    assert.equal(params.get('redirect_uri'), authorizeRedirect);
+    assert.equal(params.get('code_verifier'), verifier);
+    assert.equal(params.get('client_id'), null);
+    assert.equal(params.get('client_secret'), null);
   });
 });

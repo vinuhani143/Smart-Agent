@@ -20,6 +20,11 @@ export function createApp(env: Env): Express {
   }
 
   app.disable('x-powered-by');
+  app.set('etag', false);
+  app.use((_req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    next();
+  });
   app.use(
     helmet({
       contentSecurityPolicy: false,

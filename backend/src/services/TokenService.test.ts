@@ -323,7 +323,6 @@ describe('withProviderTokens Spotify refresh', () => {
     const owner = await getStoredAccount(ownerId, 'spotify');
     assert.equal(owner?.tokens.accessToken, 'owner-access');
   });
-});
 
   it('moves an existing Spotify identity onto the current MusicMix user', async () => {
     const first = await createAnonymousAccount();

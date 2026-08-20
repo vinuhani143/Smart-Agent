@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  AppError,
   ConflictError,
+  ErrorCode,
   InsufficientPermissionsError,
   NetworkError,
   NotFoundError,
   RateLimitedError,
   TokenExpiredError,
-  TokenInvalidError,
 } from '../types/errors';
 import { throwIfProviderError } from './http';
 import { mapPool } from '../utils/asyncPool';
@@ -19,7 +20,10 @@ describe('provider HTTP error matrix', () => {
   });
 
   it('maps client and auth failures to typed errors', async () => {
-    await assert.rejects(() => throwIfProviderError(new Response('{}', { status: 400 })), TokenInvalidError);
+    await assert.rejects(
+      () => throwIfProviderError(new Response('{}', { status: 400 })),
+      (error: unknown) => error instanceof AppError && (error as AppError).code === ErrorCode.VALIDATION_ERROR,
+    );
     await assert.rejects(() => throwIfProviderError(new Response('{}', { status: 401 })), TokenExpiredError);
     await assert.rejects(() => throwIfProviderError(new Response('{}', { status: 403 })), InsufficientPermissionsError);
     await assert.rejects(() => throwIfProviderError(new Response('{}', { status: 404 })), NotFoundError);

@@ -37,6 +37,18 @@ describe('messageForHttpStatus', () => {
   });
 });
 
+describe('placeholder API errors', () => {
+  it('keeps a dedicated not-configured code distinct from catalog 404 copy', () => {
+    const error = new ApiClientError(
+      'MusicMix cannot reach its server. This install still uses a placeholder API address, so search, AI, and playlists will not work until you deploy the backend and rebuild the app with that HTTPS URL.',
+      0,
+      'API_NOT_CONFIGURED',
+    );
+    assert.equal(toUserMessage(error), error.message);
+    assert.equal(error.status, 0);
+  });
+});
+
 describe('isRemoteArtworkUrl', () => {
   it('allows http(s) artwork and rejects invalid or script URLs', () => {
     assert.equal(isRemoteArtworkUrl('https://i.scdn.co/image/ab'), true);

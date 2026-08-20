@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolvePublicApiUrl } from './apiUrl';
+import { isPlaceholderApiUrl, resolvePublicApiUrl } from './apiUrl';
 
 describe('resolvePublicApiUrl', () => {
   it('rejects missing and localhost values in production', () => {
@@ -31,5 +31,14 @@ describe('resolvePublicApiUrl', () => {
 
   it('does not silently default localhost in development', () => {
     assert.throws(() => resolvePublicApiUrl({ value: '', nodeEnv: 'development', devFlag: true }), /explicitly/i);
+  });
+});
+
+describe('isPlaceholderApiUrl', () => {
+  it('detects documented placeholder hosts and not a real origin', () => {
+    assert.equal(isPlaceholderApiUrl('https://YOUR-RENDER-SERVICE.onrender.com'), true);
+    assert.equal(isPlaceholderApiUrl('https://YOUR-REAL-RENDER-URL.onrender.com'), true);
+    assert.equal(isPlaceholderApiUrl('https://YOUR_PRODUCTION_BACKEND_DOMAIN'), true);
+    assert.equal(isPlaceholderApiUrl('https://api.example.com'), false);
   });
 });

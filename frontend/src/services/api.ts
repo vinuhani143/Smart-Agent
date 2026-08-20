@@ -1,5 +1,6 @@
 import * as SecureStore from 'expo-secure-store';
 import { create } from 'zustand';
+import { API_NOT_CONFIGURED_MESSAGE, isPlaceholderApiUrl } from '@/constants/apiUrl';
 import { API_URL, RECOVERY_CODE_KEY, SESSION_TOKEN_KEY } from '@/constants/config';
 import { ApiClientError, messageForHttpStatus } from '@/utils/errors';
 import type { ApiErrorBody } from '@/types';
@@ -67,7 +68,11 @@ async function parseError(response: Response): Promise<ApiClientError> {
     const message = messageForHttpStatus(response.status, body.error?.message ?? '');
     return new ApiClientError(message, response.status, body.error?.code ?? 'UNKNOWN');
   } catch {
-    return new ApiClientError(messageForHttpStatus(response.status, ''), response.status, 'UNKNOWN');
+    const message =
+      response.status === 404
+        ? 'Cannot reach the MusicMix server. This install is not pointed at a live API.'
+        : messageForHttpStatus(response.status, '');
+    return new ApiClientError(message, response.status, 'API_UNREACHABLE');
   }
 }
 
@@ -79,6 +84,9 @@ function isMusicMixSessionError(error: ApiClientError): boolean {
 }
 
 export async function apiFetch<T>(path: string, init: RequestInit = {}, isRetry = false): Promise<T> {
+  if (isPlaceholderApiUrl(API_URL)) {
+    throw new ApiClientError(API_NOT_CONFIGURED_MESSAGE, 0, 'API_NOT_CONFIGURED');
+  }
   const token = useAuthStore.getState().token;
   const headers = new Headers(init.headers);
   headers.set('Accept', 'application/json');

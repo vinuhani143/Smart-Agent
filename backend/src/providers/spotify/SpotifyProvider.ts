@@ -1,5 +1,5 @@
 import { getEnv } from '../../config/env';
-import { ConfigurationError, TokenInvalidError } from '../../types/errors';
+import { AppError, ConfigurationError, TokenInvalidError } from '../../types/errors';
 import type {
   AuthorizationRequest,
   CreatePlaylistInput,
@@ -13,6 +13,7 @@ import type {
   TrackResult,
 } from '../../types/provider';
 import { bearerHeaders, providerJson, requireAccessToken } from '../http';
+import { logger } from '../../utils/logger';
 import {
   requestSpotifyToken,
   spotifyAuthorizationCodeBody,
@@ -171,7 +172,7 @@ export class SpotifyProvider implements MusicProvider {
       );
     }
     const response = await requestSpotifyToken(spotifyRefreshTokenBody(tokens.refreshToken), this.tokenHeaders());
-    return tokensFromSpotifyResponse(response, tokens.refreshToken);
+    return tokensFromSpotifyResponse(response, tokens.refreshToken, 'refresh_token');
   }
 
   async getCurrentUser(tokens: ProviderTokens): Promise<ProviderUser> {
@@ -199,11 +200,26 @@ export class SpotifyProvider implements MusicProvider {
     url.searchParams.set('limit', String(params.limit ?? 20));
     url.searchParams.set('offset', String(params.offset ?? 0));
 
-    const data = await providerJson<SpotifySearchResponse>(url.toString(), {
-      headers: bearerHeaders(accessToken),
-    });
-    const tracks = (data.tracks?.items ?? []).filter((item): item is SpotifyTrack => item !== null).map(mapTrack);
-    return applyLocalFilters(tracks, params);
+    try {
+      const data = await providerJson<SpotifySearchResponse>(url.toString(), {
+        headers: bearerHeaders(accessToken),
+      });
+      const tracks = (data.tracks?.items ?? []).filter((item): item is SpotifyTrack => item !== null).map(mapTrack);
+      const filtered = applyLocalFilters(tracks, params);
+      logger.info('spotify search', {
+        authenticated: true,
+        httpStatus: 200,
+        resultCount: filtered.length,
+      });
+      return filtered;
+    } catch (error) {
+      logger.warn('spotify search', {
+        authenticated: true,
+        httpStatus: error instanceof AppError ? error.statusCode : undefined,
+        code: error instanceof AppError ? error.code : undefined,
+      });
+      throw error;
+    }
   }
 
   async getTrack(tokens: ProviderTokens, providerTrackId: string): Promise<TrackResult> {
@@ -375,12 +391,11 @@ export class SpotifyProvider implements MusicProvider {
       spotifyAuthorizationCodeBody({
         code,
         redirectUri: env.SPOTIFY_REDIRECT_URI,
-        clientId: env.SPOTIFY_CLIENT_ID,
         codeVerifier,
       }),
       this.tokenHeaders(),
     );
-    return tokensFromSpotifyResponse(response);
+    return tokensFromSpotifyResponse(response, undefined, 'authorization_code');
   }
 
   private tokenHeaders(): Record<string, string> {

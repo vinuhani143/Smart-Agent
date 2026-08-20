@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import { ErrorCode } from '../../types/errors';
 import {
   mapSpotifyTokenError,
+  spotifyAuthorizationCodeBody,
   spotifyRefreshTokenBody,
   tokensFromSpotifyResponse,
 } from './spotifyAuth';
@@ -24,6 +25,31 @@ describe('spotifyAuth', () => {
         assert.equal(error.code, ErrorCode.TOKEN_INVALID);
         assert.match(error.message, /reconnect Spotify/i);
         assert.equal(error.message.includes('Refresh token revoked'), false);
+        return true;
+      },
+    );
+  });
+
+  it('builds a confidential-client authorization-code body with PKCE and without client_id', () => {
+    const body = spotifyAuthorizationCodeBody({
+      code: 'auth-code',
+      redirectUri: 'https://musicmix-api.onrender.com/api/auth/spotify/callback',
+      codeVerifier: 'verifier',
+    });
+    assert.equal(body.get('grant_type'), 'authorization_code');
+    assert.equal(body.get('code_verifier'), 'verifier');
+    assert.equal(body.get('client_id'), null);
+    assert.equal(body.get('client_secret'), null);
+    assert.equal(body.toString().includes('client_id'), false);
+  });
+
+  it('maps a failed authorization-code exchange without blaming refresh', () => {
+    assert.throws(
+      () => mapSpotifyTokenError(400, { error: 'invalid_grant' }, 'authorization_code'),
+      (error: Error & { code?: string }) => {
+        assert.equal(error.code, ErrorCode.OAUTH_FAILED);
+        assert.match(error.message, /SPOTIFY_REDIRECT_URI|authorization code/i);
+        assert.equal(error.message.toLowerCase().includes('refresh'), false);
         return true;
       },
     );

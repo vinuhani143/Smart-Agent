@@ -185,3 +185,15 @@ export function isAccessTokenExpiredError(error: unknown): boolean {
     (error instanceof AppError && error.code === ErrorCode.TOKEN_EXPIRED)
   );
 }
+
+/** True when the user must reconnect a music service rather than retry a search. */
+export function isProviderAuthError(error: unknown): boolean {
+  if (isAccessTokenExpiredError(error)) {
+    return true;
+  }
+  return (
+    error instanceof TokenInvalidError ||
+    (error instanceof AppError &&
+      (error.code === ErrorCode.TOKEN_INVALID || error.code === ErrorCode.UNAUTHORIZED))
+  );
+}

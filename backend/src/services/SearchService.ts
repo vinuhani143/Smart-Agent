@@ -1,5 +1,5 @@
 import { prisma } from '../config/prisma';
-import { NoSearchResultsError, TokenInvalidError } from '../types/errors';
+import { NoSearchResultsError, TokenInvalidError, isProviderAuthError } from '../types/errors';
 import type { ProviderId, SearchTracksParams, TrackResult } from '../types/provider';
 import { fromPrismaProvider, getProvider } from '../providers/ProviderRegistry';
 import { amazonDisabledError } from '../providers/amazon/amazonErrors';
@@ -70,6 +70,10 @@ export async function searchConnectedProviders(
     const quota = errors.find((error) => isNonRetryableProviderError(error));
     if (quota) {
       throw quota;
+    }
+    const authError = errors.find((error) => isProviderAuthError(error));
+    if (authError) {
+      throw authError;
     }
     throw new NoSearchResultsError(params.query);
   }

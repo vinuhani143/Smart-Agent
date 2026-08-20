@@ -39,6 +39,12 @@ export interface SpotifyTokenRequestDiagnostics {
   verifierLength: number;
   grantType: SpotifyTokenGrant;
   contentType: 'application/x-www-form-urlencoded';
+  bodyHasClientId?: boolean;
+  bodyHasClientSecret?: boolean;
+  authorizationScheme?: 'Basic' | 'none';
+  clientIdHadWhitespace?: boolean;
+  clientSecretHadWhitespace?: boolean;
+  redirectUriHadWhitespace?: boolean;
 }
 
 export interface SpotifyAuthorizationCodeRequest {
@@ -50,14 +56,7 @@ export interface SpotifyAuthorizationCodeRequest {
   };
   body: URLSearchParams;
   bodyKeys: string[];
-  diagnostics: SpotifyTokenRequestDiagnostics & {
-    bodyHasClientId: boolean;
-    bodyHasClientSecret: boolean;
-    authorizationScheme: 'Basic';
-    clientIdHadWhitespace: boolean;
-    clientSecretHadWhitespace: boolean;
-    redirectUriHadWhitespace: boolean;
-  };
+  diagnostics: Required<SpotifyTokenRequestDiagnostics>;
 }
 
 export function trimSpotifyEnvValue(value: string): string {
@@ -251,7 +250,7 @@ export function tokensFromSpotifyResponse(
 export async function requestSpotifyToken(
   body: URLSearchParams,
   headers: Record<string, string>,
-  diagnostics?: Partial<SpotifyTokenRequestDiagnostics> & Record<string, unknown>,
+  diagnostics?: Partial<SpotifyTokenRequestDiagnostics>,
 ): Promise<SpotifyTokenResponse> {
   const grantType: SpotifyTokenGrant =
     body.get('grant_type') === 'authorization_code' ? 'authorization_code' : 'refresh_token';

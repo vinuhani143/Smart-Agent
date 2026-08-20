@@ -1,5 +1,5 @@
 import { getEnv } from '../../config/env';
-import { ConfigurationError, OAuthFailedError, TokenInvalidError } from '../../types/errors';
+import { ConfigurationError, TokenInvalidError } from '../../types/errors';
 import type {
   AuthorizationRequest,
   CreatePlaylistInput,
@@ -13,9 +13,15 @@ import type {
   TrackResult,
 } from '../../types/provider';
 import { bearerHeaders, providerJson, requireAccessToken } from '../http';
+import {
+  requestSpotifyToken,
+  spotifyAuthorizationCodeBody,
+  spotifyBasicAuthHeader,
+  spotifyRefreshTokenBody,
+  tokensFromSpotifyResponse,
+} from './spotifyAuth';
 
 const SPOTIFY_AUTHORIZE = 'https://accounts.spotify.com/authorize';
-const SPOTIFY_TOKEN = 'https://accounts.spotify.com/api/token';
 const SPOTIFY_API = 'https://api.spotify.com/v1';
 
 const SPOTIFY_SCOPES = [
@@ -26,16 +32,6 @@ const SPOTIFY_SCOPES = [
   'playlist-modify-public',
   'playlist-modify-private',
 ].join(' ');
-
-interface SpotifyTokenResponse {
-  access_token: string;
-  token_type: string;
-  expires_in: number;
-  refresh_token?: string;
-  scope?: string;
-  error?: string;
-  error_description?: string;
-}
 
 interface SpotifyUserResponse {
   id: string;
@@ -170,20 +166,12 @@ export class SpotifyProvider implements MusicProvider {
 
   async refreshAccessToken(tokens: ProviderTokens): Promise<ProviderTokens> {
     if (!tokens.refreshToken) {
-      throw new TokenInvalidError('Spotify did not provide a refresh token. Please reconnect.');
+      throw new TokenInvalidError(
+        'Your Spotify session expired. Please reconnect Spotify in Settings.',
+      );
     }
-    const env = this.requireConfig();
-    const body = new URLSearchParams({
-      grant_type: 'refresh_token',
-      refresh_token: tokens.refreshToken,
-      client_id: env.SPOTIFY_CLIENT_ID,
-    });
-    const response = await providerJson<SpotifyTokenResponse>(SPOTIFY_TOKEN, {
-      method: 'POST',
-      headers: this.tokenHeaders(),
-      body,
-    });
-    return this.toTokens(response, tokens.refreshToken);
+    const response = await requestSpotifyToken(spotifyRefreshTokenBody(tokens.refreshToken), this.tokenHeaders());
+    return tokensFromSpotifyResponse(response, tokens.refreshToken);
   }
 
   async getCurrentUser(tokens: ProviderTokens): Promise<ProviderUser> {
@@ -383,41 +371,23 @@ export class SpotifyProvider implements MusicProvider {
 
   private async exchangeCode(code: string, codeVerifier?: string): Promise<ProviderTokens> {
     const env = this.requireConfig();
-    const body = new URLSearchParams({
-      grant_type: 'authorization_code',
-      code,
-      redirect_uri: env.SPOTIFY_REDIRECT_URI,
-      client_id: env.SPOTIFY_CLIENT_ID,
-    });
-    if (codeVerifier) {
-      body.set('code_verifier', codeVerifier);
-    }
-    const response = await providerJson<SpotifyTokenResponse>(SPOTIFY_TOKEN, {
-      method: 'POST',
-      headers: this.tokenHeaders(),
-      body,
-    });
-    if (response.error) {
-      throw new OAuthFailedError('Spotify did not accept the authorization code.');
-    }
-    return this.toTokens(response);
+    const response = await requestSpotifyToken(
+      spotifyAuthorizationCodeBody({
+        code,
+        redirectUri: env.SPOTIFY_REDIRECT_URI,
+        clientId: env.SPOTIFY_CLIENT_ID,
+        codeVerifier,
+      }),
+      this.tokenHeaders(),
+    );
+    return tokensFromSpotifyResponse(response);
   }
 
   private tokenHeaders(): Record<string, string> {
     const env = this.requireConfig();
-    const basic = Buffer.from(`${env.SPOTIFY_CLIENT_ID}:${env.SPOTIFY_CLIENT_SECRET}`).toString('base64');
     return {
-      Authorization: `Basic ${basic}`,
+      Authorization: spotifyBasicAuthHeader(env.SPOTIFY_CLIENT_ID, env.SPOTIFY_CLIENT_SECRET),
       'Content-Type': 'application/x-www-form-urlencoded',
-    };
-  }
-
-  private toTokens(response: SpotifyTokenResponse, fallbackRefresh?: string): ProviderTokens {
-    return {
-      accessToken: response.access_token,
-      refreshToken: response.refresh_token ?? fallbackRefresh,
-      expiresAt: new Date(Date.now() + response.expires_in * 1000),
-      scopes: response.scope,
     };
   }
 

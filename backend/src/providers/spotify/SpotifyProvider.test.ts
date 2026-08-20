@@ -123,6 +123,50 @@ describe('SpotifyProvider', () => {
     assert.equal(tokenRequest.body.includes('client_secret'), false);
   });
 
+  it('exchanges an authorization code with Basic auth, PKCE, and no client_id in the body', async () => {
+    const calls: Array<{ url: string; auth: string | null; body: string }> = [];
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      const headers = new Headers(init?.headers);
+      const body =
+        typeof init?.body === 'string'
+          ? init.body
+          : init?.body instanceof URLSearchParams
+            ? init.body.toString()
+            : '';
+      calls.push({ url, auth: headers.get('authorization'), body });
+      if (url.includes('/api/token')) {
+        return new Response(
+          JSON.stringify({
+            access_token: 'new-access',
+            refresh_token: 'new-refresh',
+            token_type: 'Bearer',
+            expires_in: 3600,
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response(JSON.stringify({ id: 'spotify-user', display_name: 'Listener' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+
+    const result = await provider.authenticate('auth-code', 'pkce-verifier');
+    assert.equal(result.accessToken, 'new-access');
+    assert.equal(result.refreshToken, 'new-refresh');
+    assert.equal(result.user.id, 'spotify-user');
+    const tokenCall = calls.find((call) => call.url.includes('/api/token'));
+    assert.ok(tokenCall);
+    assert.equal(tokenCall.auth?.startsWith('Basic '), true);
+    assert.equal(tokenCall.body.includes('grant_type=authorization_code'), true);
+    assert.equal(tokenCall.body.includes('code_verifier=pkce-verifier'), true);
+    assert.equal(tokenCall.body.includes('redirect_uri='), true);
+    assert.equal(tokenCall.body.includes('client_id'), false);
+    assert.equal(tokenCall.body.includes('client_secret'), false);
+    assert.equal(tokenCall.body.includes('spotify-client-secret'), false);
+  });
+
   it('maps a failed refresh to a reconnect error without leaking tokens', async () => {
     globalThis.fetch = (async () =>
       new Response(JSON.stringify({ error: 'invalid_grant', error_description: 'Refresh token revoked' }), {

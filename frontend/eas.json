@@ -19,7 +19,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://YOUR_PRODUCTION_BACKEND_DOMAIN"
+        "EXPO_PUBLIC_API_URL": "https://musicmix-api.onrender.com"
       }
     },
     "production": {

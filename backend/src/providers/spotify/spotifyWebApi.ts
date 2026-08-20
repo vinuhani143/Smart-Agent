@@ -5,15 +5,19 @@ import {
   NetworkError,
   NotFoundError,
   RateLimitedError,
+  SpotifyInvalidTokenError,
+  SpotifyServerError,
   TokenExpiredError,
 } from '../../types/errors';
 import { logger } from '../../utils/logger';
 import { isLikelyJwt } from '../../utils/crypto';
 
+export const SPOTIFY_SEARCH_URL = 'https://api.spotify.com/v1/search';
+
 export function spotifyUserBearerHeaders(accessToken: string): Record<string, string> {
   const token = accessToken.trim();
   if (!token || isLikelyJwt(token)) {
-    throw new TokenExpiredError();
+    throw new TokenExpiredError('Spotify access token expired.');
   }
   return {
     Authorization: `Bearer ${token}`,
@@ -70,7 +74,41 @@ function safeSpotifyWebApiErrorField(value: string | undefined): string | undefi
   return value;
 }
 
-export function logSpotifyWebApiError(httpStatus: number, body: unknown): void {
+export function isSpotifyAuthSearchStatus(status: number, message: string): boolean {
+  if (status === 401) {
+    return true;
+  }
+  return status === 400 && isSpotifyBearerAuthFailure(message);
+}
+
+export interface SpotifySearchHttpResult {
+  status: number;
+  ok: boolean;
+  body: unknown;
+  error: string | undefined;
+  errorDescription: string | undefined;
+}
+
+async function spotifySearchFetch(url: string, headers: Record<string, string>): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15_000);
+  try {
+    return await fetch(url, {
+      method: 'GET',
+      headers,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new NetworkError('The music service took too long to respond.');
+    }
+    throw new NetworkError();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function searchErrorFields(body: unknown): { error: string | undefined; errorDescription: string | undefined } {
   const parsed = spotifyWebApiMessage(body);
   const stringError =
     body && typeof body === 'object' && typeof (body as { error?: unknown }).error === 'string'
@@ -80,10 +118,95 @@ export function logSpotifyWebApiError(httpStatus: number, body: unknown): void {
     body && typeof body === 'object' && typeof (body as { error_description?: unknown }).error_description === 'string'
       ? String((body as { error_description: string }).error_description)
       : parsed.message;
+  return {
+    error: safeSpotifyWebApiErrorField(stringError ?? parsed.message),
+    errorDescription: safeSpotifyWebApiErrorField(description),
+  };
+}
+
+export async function fetchSpotifyTrackSearch(input: {
+  accessToken: string;
+  query: string;
+  limit?: number;
+  offset?: number;
+  attempt: 'initial' | 'retry';
+}): Promise<SpotifySearchHttpResult> {
+  const url = new URL(SPOTIFY_SEARCH_URL);
+  url.searchParams.set('q', input.query);
+  url.searchParams.set('type', 'track');
+  url.searchParams.set('limit', String(input.limit ?? 20));
+  url.searchParams.set('offset', String(input.offset ?? 0));
+  const headers = spotifyUserBearerHeaders(input.accessToken);
+  const response = await spotifySearchFetch(url.toString(), headers);
+  const raw = await response.text();
+  let body: unknown;
+  try {
+    body = raw ? JSON.parse(raw) : undefined;
+  } catch {
+    body = undefined;
+  }
+  const fields = searchErrorFields(body);
+  if (input.attempt === 'retry') {
+    logger.info('spotify search retry', {
+      spotifyRetryStatus: response.status,
+      spotifyRetryError: fields.error ?? null,
+    });
+  } else {
+    logger.info('spotify search response', {
+      spotifySearchStatus: response.status,
+      spotifySearchError: fields.error ?? null,
+      spotifySearchErrorDescription: fields.errorDescription ?? null,
+    });
+  }
+  return {
+    status: response.status,
+    ok: response.ok,
+    body,
+    error: fields.error,
+    errorDescription: fields.errorDescription,
+  };
+}
+
+export function mapSpotifySearchFailure(
+  result: SpotifySearchHttpResult,
+  options?: { afterRefresh?: boolean },
+): AppError {
+  const message = result.error ?? result.errorDescription ?? '';
+  if (isSpotifyAuthSearchStatus(result.status, message)) {
+    if (options?.afterRefresh) {
+      return new SpotifyInvalidTokenError();
+    }
+    return new TokenExpiredError('Spotify access token expired.');
+  }
+  if (result.status === 429) {
+    return new RateLimitedError();
+  }
+  if (result.status >= 500) {
+    return new SpotifyServerError();
+  }
+  if (result.status === 403) {
+    return new InsufficientPermissionsError();
+  }
+  if (result.status === 404) {
+    return new NotFoundError('That item was not found on the music service.');
+  }
+  if (result.status === 400) {
+    return new AppError(
+      ErrorCode.VALIDATION_ERROR,
+      'Spotify could not complete this search. Try a different query.',
+      400,
+      { diagnosticCode: 'SPOTIFY_SEARCH_BAD_REQUEST' },
+    );
+  }
+  return new NetworkError(`Spotify search returned HTTP ${result.status}.`);
+}
+
+function logSpotifyWebApiError(httpStatus: number, body: unknown): void {
+  const fields = searchErrorFields(body);
   logger.info('spotify web api error', {
     status: httpStatus,
-    error: safeSpotifyWebApiErrorField(stringError ?? parsed.message) ?? null,
-    error_description: safeSpotifyWebApiErrorField(description) ?? null,
+    error: fields.error ?? null,
+    error_description: fields.errorDescription ?? null,
   });
 }
 

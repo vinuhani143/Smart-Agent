@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { isRemoteArtworkUrl } from './artwork';
-import { ApiClientError, messageForHttpStatus, toUserMessage } from './errors';
+import { ApiClientError, messageForHttpStatus, searchErrorPresentation, toUserMessage } from './errors';
 
 describe('toUserMessage', () => {
   it('returns API error messages as written', () => {
@@ -34,6 +34,50 @@ describe('messageForHttpStatus', () => {
     assert.match(messageForHttpStatus(400, ''), /failed/i);
     assert.match(messageForHttpStatus(502, ''), /try again/i);
     assert.equal(messageForHttpStatus(401, 'Reconnect Spotify.'), 'Reconnect Spotify.');
+  });
+});
+
+describe('searchErrorPresentation', () => {
+  it('distinguishes Spotify reconnect, decrypt, invalid token, rate limit, and server errors', () => {
+    assert.equal(
+      searchErrorPresentation(new ApiClientError('Reconnect Spotify.', 401, 'SPOTIFY_RECONNECT_REQUIRED')).title,
+      'Reconnect required',
+    );
+    assert.equal(
+      searchErrorPresentation(new ApiClientError('Reconnect Spotify.', 401, 'SPOTIFY_TOKEN_DECRYPT_FAILED')).title,
+      'Reconnect required',
+    );
+    assert.equal(
+      searchErrorPresentation(
+        new ApiClientError('Spotify rejected the access token. Reconnect Spotify.', 401, 'SPOTIFY_INVALID_TOKEN'),
+      ).title,
+      'Reconnect required',
+    );
+    assert.equal(
+      searchErrorPresentation(
+        new ApiClientError('The music service is temporarily limiting requests.', 429, 'RATE_LIMITED'),
+      ).title,
+      'Too many requests',
+    );
+    assert.equal(
+      searchErrorPresentation(
+        new ApiClientError('Spotify is temporarily unavailable. Try again.', 503, 'SPOTIFY_SERVER_ERROR'),
+      ).title,
+      'Spotify is unavailable',
+    );
+  });
+
+  it('does not show the generic rejected-request copy for structured Spotify codes', () => {
+    const presented = searchErrorPresentation(
+      new ApiClientError(
+        'The music service rejected the request. Please reconnect the account.',
+        401,
+        'SPOTIFY_RECONNECT_REQUIRED',
+      ),
+    );
+    assert.equal(presented.title, 'Reconnect required');
+    assert.equal(presented.message, 'Reconnect Spotify.');
+    assert.equal(presented.message.includes('rejected the request'), false);
   });
 });
 

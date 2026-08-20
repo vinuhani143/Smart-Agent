@@ -14,7 +14,7 @@ import { useInfiniteSearch } from '@/hooks/useSearch';
 import { useAppTheme } from '@/theme/AppThemeProvider';
 import type { SearchFilters, TrackResult } from '@/types';
 import { trackKey } from '@/utils/duplicates';
-import { ApiClientError, toUserMessage } from '@/utils/errors';
+import { searchErrorPresentation } from '@/utils/errors';
 
 type Scope = NonNullable<SearchFilters['provider']>;
 
@@ -82,16 +82,11 @@ export function SearchScreen() {
       />
     );
   } else if (search.isError) {
-    const reconnect =
-      search.error instanceof ApiClientError &&
-      (search.error.status === 401 ||
-        search.error.code === 'TOKEN_INVALID' ||
-        search.error.code === 'TOKEN_EXPIRED' ||
-        search.error.code === 'SPOTIFY_RECONNECT_REQUIRED');
+    const presentation = searchErrorPresentation(search.error);
     body = (
       <ErrorState
-        title={reconnect ? 'Reconnect required' : 'Search failed'}
-        message={toUserMessage(search.error)}
+        title={presentation.title}
+        message={presentation.message}
         onRetry={() => void search.refetch()}
       />
     );

@@ -1,10 +1,24 @@
 import { prisma } from '../config/prisma';
-import { NoSearchResultsError, TokenInvalidError, isProviderAuthError } from '../types/errors';
+import { AppError, ErrorCode, NoSearchResultsError, TokenInvalidError, isProviderAuthError } from '../types/errors';
 import type { ProviderId, SearchTracksParams, TrackResult } from '../types/provider';
 import { fromPrismaProvider, getProvider } from '../providers/ProviderRegistry';
 import { amazonDisabledError } from '../providers/amazon/amazonErrors';
+import { executeSpotifyTrackSearch } from '../providers/spotify/SpotifyProvider';
 import { isNonRetryableProviderError } from '../providers/youtube/youtubeErrors';
-import { listConnectedProviders, withProviderTokens } from './TokenService';
+import { listConnectedProviders, withProviderTokens, withSpotifySearchTokens } from './TokenService';
+
+async function searchWithTokens(
+  userId: string,
+  provider: ProviderId,
+  params: SearchTracksParams,
+): Promise<TrackResult[]> {
+  if (provider === 'spotify') {
+    return withSpotifySearchTokens(userId, (tokens, attempt) =>
+      executeSpotifyTrackSearch(tokens, params, attempt),
+    );
+  }
+  return withProviderTokens(userId, provider, (tokens) => getProvider(provider).searchTracks(tokens, params));
+}
 
 export async function searchProvider(
   userId: string,
@@ -18,7 +32,7 @@ export async function searchProvider(
     }
     throw new TokenInvalidError(`${adapter.displayName} is not configured on this server.`);
   }
-  const results = await withProviderTokens(userId, provider, (tokens) => adapter.searchTracks(tokens, params));
+  const results = await searchWithTokens(userId, provider, params);
   if (results.length === 0) {
     throw new NoSearchResultsError(params.query);
   }
@@ -47,9 +61,7 @@ export async function searchConnectedProviders(
   const groups = await Promise.all(
     providerIds.map(async (provider) => {
       try {
-        return await withProviderTokens(userId, provider, (tokens) =>
-          getProvider(provider).searchTracks(tokens, params),
-        );
+        return await searchWithTokens(userId, provider, params);
       } catch (error) {
         if (restrictTo?.length === 1 || isNonRetryableProviderError(error)) {
           if (restrictTo?.length === 1) {
@@ -74,6 +86,14 @@ export async function searchConnectedProviders(
     const authError = errors.find((error) => isProviderAuthError(error));
     if (authError) {
       throw authError;
+    }
+    const structured = errors.find(
+      (error) =>
+        error instanceof AppError &&
+        (error.code === ErrorCode.RATE_LIMITED || error.code === ErrorCode.SPOTIFY_SERVER_ERROR),
+    );
+    if (structured) {
+      throw structured;
     }
     throw new NoSearchResultsError(params.query);
   }

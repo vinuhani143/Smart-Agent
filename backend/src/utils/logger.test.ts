@@ -52,4 +52,36 @@ describe('redactLogMeta', () => {
     assert.equal(redacted.code_verifier, '[redacted]');
     assert.equal(redacted.access_token, '[redacted]');
   });
+
+  it('keeps Spotify search/refresh diagnostics while still redacting secrets', () => {
+    const redacted = redactLogMeta({
+      userIdPresent: true,
+      spotifyAccountFound: true,
+      providerUserIdPresent: true,
+      accessTokenPresent: true,
+      refreshTokenPresent: true,
+      expiresAt: '2026-08-20T00:00:00.000Z',
+      accessTokenExpired: false,
+      refreshAttempted: true,
+      spotifyRefreshStatus: 400,
+      spotifyRefreshError: 'invalid_grant',
+      spotifyRefreshErrorDescription: 'Refresh token revoked',
+      spotifySearchStatus: 401,
+      spotifySearchError: 'The access token expired',
+      spotifySearchErrorDescription: 'The access token expired',
+      spotifyRetryStatus: 200,
+      spotifyRetryError: null,
+      access_token: 'must-not-appear',
+      refresh_token: 'must-not-appear',
+    }) as Record<string, unknown>;
+    assert.equal(redacted.userIdPresent, true);
+    assert.equal(redacted.spotifyAccountFound, true);
+    assert.equal(redacted.refreshAttempted, true);
+    assert.equal(redacted.spotifyRefreshStatus, 400);
+    assert.equal(redacted.spotifyRefreshError, 'invalid_grant');
+    assert.equal(redacted.spotifySearchStatus, 401);
+    assert.equal(redacted.spotifyRetryStatus, 200);
+    assert.equal(redacted.access_token, '[redacted]');
+    assert.equal(redacted.refresh_token, '[redacted]');
+  });
 });

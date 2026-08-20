@@ -271,6 +271,7 @@ export async function requestSpotifyToken(
     clientIdHadWhitespace: diagnostics?.clientIdHadWhitespace ?? null,
     clientSecretHadWhitespace: diagnostics?.clientSecretHadWhitespace ?? null,
     redirectUriHadWhitespace: diagnostics?.redirectUriHadWhitespace ?? null,
+    ...(grantType === 'refresh_token' ? { refreshAttempted: true } : {}),
   });
   const response = await providerFetch(SPOTIFY_TOKEN_URL, {
     method: 'POST',
@@ -285,12 +286,22 @@ export async function requestSpotifyToken(
     parsed = undefined;
   }
   const spotifyTokenError = typeof parsed?.error === 'string' ? parsed.error : undefined;
+  const refreshLog =
+    grantType === 'refresh_token'
+      ? {
+          refreshAttempted: true,
+          spotifyRefreshStatus: response.status,
+          spotifyRefreshError: spotifyTokenError ?? null,
+          spotifyRefreshErrorDescription: safeErrorDescription(parsed?.error_description) ?? null,
+        }
+      : {};
   logger.info('spotify token response', {
     grantType,
     spotifyTokenStatus: response.status,
     spotifyTokenError: spotifyTokenError ?? null,
     spotifyTokenErrorDescription: safeErrorDescription(parsed?.error_description) ?? null,
     ok: response.ok,
+    ...refreshLog,
   });
   if (!response.ok) {
     mapSpotifyTokenError(response.status, parsed, grantType);

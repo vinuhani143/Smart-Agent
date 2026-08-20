@@ -122,6 +122,7 @@ function assertNoSecrets(raw: string): void {
   assert.equal(raw.includes('stale-access'), false);
   assert.equal(raw.includes('rotated-access'), false);
   assert.equal(raw.includes('valid-access'), false);
+  assert.equal(raw.toLowerCase().includes('the music service rejected the request'), false);
 }
 
 before(async () => {
@@ -271,8 +272,8 @@ describe('GET /api/search/spotify', () => {
     });
     assert.equal(status, 401, raw);
     const error = body.error as Record<string, unknown>;
-    assert.equal(error.code, 'TOKEN_INVALID');
-    assert.match(String(error.message), /reconnect Spotify/i);
+    assert.equal(error.code, 'SPOTIFY_RECONNECT_REQUIRED');
+    assert.match(String(error.message), /Reconnect Spotify/i);
     assert.equal(String(error.message).toLowerCase().includes('search failed'), false);
     assertNoSecrets(raw);
   });
@@ -334,9 +335,136 @@ describe('GET /api/search/spotify', () => {
     });
     assert.equal(status, 401, raw);
     const error = body.error as Record<string, unknown>;
-    assert.equal(error.code, 'TOKEN_INVALID');
-    assert.match(String(error.message), /reconnect Spotify/i);
+    assert.equal(error.code, 'SPOTIFY_RECONNECT_REQUIRED');
+    assert.match(String(error.message), /Reconnect Spotify/i);
     assert.equal(String(error.message).toLowerCase().includes('no songs matched'), false);
+    assertNoSecrets(raw);
+  });
+
+  it('returns SPOTIFY_RECONNECT_REQUIRED on GET /api/search/spotify when refresh fails', async () => {
+    const session = await createSession();
+    await connectSpotify(session.userId, {
+      accessToken: 'expired-access',
+      refreshToken: 'secret-refresh-token-value',
+      expiresAt: new Date(Date.now() - 60_000),
+    });
+    installSpotifyFetchMock((url) => {
+      if (url.includes('/api/token')) {
+        return jsonResponse(400, { error: 'invalid_grant', error_description: 'Refresh token revoked' });
+      }
+      return jsonResponse(500, { error: 'search should not run' });
+    });
+
+    const { status, body, raw } = await json(`/api/search/spotify?q=${encodeURIComponent('naatu')}`, {
+      headers: { Authorization: `Bearer ${session.token}` },
+    });
+    assert.equal(status, 401, raw);
+    const error = body.error as Record<string, unknown>;
+    assert.equal(error.code, 'SPOTIFY_RECONNECT_REQUIRED');
+    assert.equal(error.message, 'Reconnect Spotify.');
+    assert.equal(status === 404, false);
+    assertNoSecrets(raw);
+  });
+
+  it('refreshes when the stored access token cannot be decrypted and never sends ciphertext', async () => {
+    const session = await createSession();
+    await connectSpotify(session.userId, {
+      accessToken: 'valid-access',
+      refreshToken: 'stored-refresh',
+      expiresAt: new Date(Date.now() + 30 * 60 * 1000),
+    });
+    await prisma.musicAccount.update({
+      where: { userId_provider: { userId: session.userId, provider: 'SPOTIFY' } },
+      data: { accessToken: 'not-a-valid.cipher.text' },
+    });
+    const authorizations: string[] = [];
+    installSpotifyFetchMock((url, init) => {
+      const headers = new Headers(init?.headers);
+      const authorization = headers.get('authorization') ?? '';
+      authorizations.push(authorization);
+      assert.equal(authorization.includes('not-a-valid.cipher.text'), false);
+      if (url.includes('/api/token')) {
+        assert.equal(authorization.startsWith('Basic '), true);
+        return jsonResponse(200, { access_token: 'rotated-access', expires_in: 3600, token_type: 'Bearer' });
+      }
+      assert.equal(authorization, 'Bearer rotated-access');
+      return jsonResponse(200, searchHit);
+    });
+
+    const { status, raw } = await json(`/api/search/spotify?q=${encodeURIComponent('naatu')}`, {
+      headers: { Authorization: `Bearer ${session.token}` },
+    });
+    assert.equal(status, 200, raw);
+    assert.equal(authorizations.some((value) => value === `Bearer ${session.token}`), false);
+  });
+
+  it('returns 401 reconnect when Spotify refresh returns 401', async () => {
+    const session = await createSession();
+    await connectSpotify(session.userId, {
+      accessToken: 'expired-access',
+      refreshToken: 'secret-refresh-token-value',
+      expiresAt: new Date(Date.now() - 60_000),
+    });
+    let searchCalls = 0;
+    installSpotifyFetchMock((url) => {
+      if (url.includes('/api/token')) {
+        return jsonResponse(401, { error: 'invalid_token', error_description: 'Refresh token revoked' });
+      }
+      searchCalls += 1;
+      return jsonResponse(500, { error: 'search should not run after failed refresh' });
+    });
+
+    const { status, body, raw } = await json(`/api/search/spotify?q=${encodeURIComponent('naatu')}`, {
+      headers: { Authorization: `Bearer ${session.token}` },
+    });
+    assert.equal(status, 401, raw);
+    assert.equal(status === 404, false);
+    const error = body.error as Record<string, unknown>;
+    assert.equal(error.code, 'SPOTIFY_RECONNECT_REQUIRED');
+    assert.equal(error.message, 'Reconnect Spotify.');
+    assert.equal(searchCalls, 0);
+    assertNoSecrets(raw);
+  });
+
+  it('returns 401 reconnect when the stored refresh token cannot be decrypted', async () => {
+    const session = await createSession();
+    await connectSpotify(session.userId, {
+      accessToken: 'stale-access',
+      refreshToken: 'stored-refresh',
+      expiresAt: new Date(Date.now() + 30 * 60 * 1000),
+    });
+    await prisma.musicAccount.update({
+      where: { userId_provider: { userId: session.userId, provider: 'SPOTIFY' } },
+      data: { refreshToken: 'not-a-valid.cipher.text' },
+    });
+    let tokenCalls = 0;
+    installSpotifyFetchMock((url, init) => {
+      const headers = new Headers(init?.headers);
+      const authorization = headers.get('authorization') ?? '';
+      const body =
+        typeof init?.body === 'string'
+          ? init.body
+          : init?.body instanceof URLSearchParams
+            ? init.body.toString()
+            : '';
+      assert.equal(authorization.includes('not-a-valid.cipher.text'), false);
+      assert.equal(body.includes('not-a-valid.cipher.text'), false);
+      if (url.includes('/api/token')) {
+        tokenCalls += 1;
+        return jsonResponse(500, { error: 'should-not-refresh-with-ciphertext' });
+      }
+      return jsonResponse(401, { error: { status: 401, message: 'The access token expired' } });
+    });
+
+    const { status, body, raw } = await json(`/api/search/spotify?q=${encodeURIComponent('naatu')}`, {
+      headers: { Authorization: `Bearer ${session.token}` },
+    });
+    assert.equal(status, 401, raw);
+    assert.equal(status === 404, false);
+    const error = body.error as Record<string, unknown>;
+    assert.equal(error.code, 'SPOTIFY_TOKEN_DECRYPT_FAILED');
+    assert.equal(error.message, 'Reconnect Spotify.');
+    assert.equal(tokenCalls, 0);
     assertNoSecrets(raw);
   });
 });

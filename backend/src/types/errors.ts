@@ -3,6 +3,10 @@ export const ErrorCode = {
   OAUTH_CANCELLED: 'OAUTH_CANCELLED',
   TOKEN_EXPIRED: 'TOKEN_EXPIRED',
   TOKEN_INVALID: 'TOKEN_INVALID',
+  SPOTIFY_RECONNECT_REQUIRED: 'SPOTIFY_RECONNECT_REQUIRED',
+  SPOTIFY_TOKEN_DECRYPT_FAILED: 'SPOTIFY_TOKEN_DECRYPT_FAILED',
+  SPOTIFY_INVALID_TOKEN: 'SPOTIFY_INVALID_TOKEN',
+  SPOTIFY_SERVER_ERROR: 'SPOTIFY_SERVER_ERROR',
   RATE_LIMITED: 'RATE_LIMITED',
   QUOTA_EXCEEDED: 'QUOTA_EXCEEDED',
   NETWORK_ERROR: 'NETWORK_ERROR',
@@ -82,6 +86,42 @@ export class TokenInvalidError extends AppError {
   constructor(message = 'The music-service session is no longer valid. Please reconnect.') {
     super(ErrorCode.TOKEN_INVALID, message, 401);
     this.name = 'TokenInvalidError';
+  }
+}
+
+export class SpotifyReconnectRequiredError extends AppError {
+  constructor(message = 'Reconnect Spotify.') {
+    super(ErrorCode.SPOTIFY_RECONNECT_REQUIRED, message, 401, {
+      diagnosticCode: 'SPOTIFY_RECONNECT_REQUIRED',
+    });
+    this.name = 'SpotifyReconnectRequiredError';
+  }
+}
+
+export class SpotifyTokenDecryptError extends AppError {
+  constructor(message = 'Reconnect Spotify.') {
+    super(ErrorCode.SPOTIFY_TOKEN_DECRYPT_FAILED, message, 401, {
+      diagnosticCode: 'SPOTIFY_TOKEN_DECRYPT_FAILED',
+    });
+    this.name = 'SpotifyTokenDecryptError';
+  }
+}
+
+export class SpotifyInvalidTokenError extends AppError {
+  constructor(message = 'Spotify rejected the access token. Reconnect Spotify.') {
+    super(ErrorCode.SPOTIFY_INVALID_TOKEN, message, 401, {
+      diagnosticCode: 'SPOTIFY_INVALID_TOKEN',
+    });
+    this.name = 'SpotifyInvalidTokenError';
+  }
+}
+
+export class SpotifyServerError extends AppError {
+  constructor(message = 'Spotify is temporarily unavailable. Try again.') {
+    super(ErrorCode.SPOTIFY_SERVER_ERROR, message, 503, {
+      diagnosticCode: 'SPOTIFY_SERVER_ERROR',
+    });
+    this.name = 'SpotifyServerError';
   }
 }
 
@@ -193,7 +233,14 @@ export function isProviderAuthError(error: unknown): boolean {
   }
   return (
     error instanceof TokenInvalidError ||
+    error instanceof SpotifyReconnectRequiredError ||
+    error instanceof SpotifyTokenDecryptError ||
+    error instanceof SpotifyInvalidTokenError ||
     (error instanceof AppError &&
-      (error.code === ErrorCode.TOKEN_INVALID || error.code === ErrorCode.UNAUTHORIZED))
+      (error.code === ErrorCode.TOKEN_INVALID ||
+        error.code === ErrorCode.UNAUTHORIZED ||
+        error.code === ErrorCode.SPOTIFY_RECONNECT_REQUIRED ||
+        error.code === ErrorCode.SPOTIFY_TOKEN_DECRYPT_FAILED ||
+        error.code === ErrorCode.SPOTIFY_INVALID_TOKEN))
   );
 }

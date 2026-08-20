@@ -1,6 +1,8 @@
 import { logger } from '../utils/logger';
 import {
+  AppError,
   ConflictError,
+  ErrorCode,
   InsufficientPermissionsError,
   NetworkError,
   NotFoundError,
@@ -9,6 +11,7 @@ import {
   TokenInvalidError,
 } from '../types/errors';
 import { mapGoogleApiError } from './youtube/youtubeErrors';
+import { isSpotifyWebApiErrorPayload, mapSpotifyWebApiError } from './spotify/spotifyWebApi';
 
 export interface HttpRequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
@@ -60,6 +63,12 @@ export async function throwIfProviderError(response: Response): Promise<void> {
     body = undefined;
   }
 
+  if (isSpotifyWebApiErrorPayload(body)) {
+    const mapped = mapSpotifyWebApiError(response.status, body);
+    logProviderHttpError(response, mapped.code);
+    throw mapped;
+  }
+
   const mapped = mapGoogleApiError(response.status, body);
   if (mapped) {
     logProviderHttpError(response, mapped.code);
@@ -90,8 +99,12 @@ export async function throwIfProviderError(response: Response): Promise<void> {
     throw new ConflictError('The music service reported a conflict. Refresh and try again.');
   }
   if (response.status === 400) {
-    logProviderHttpError(response, 'TOKEN_INVALID');
-    throw new TokenInvalidError('The music service rejected the request. Please reconnect the account.');
+    logProviderHttpError(response, 'VALIDATION_ERROR');
+    throw new AppError(
+      ErrorCode.VALIDATION_ERROR,
+      'The music service could not complete this request.',
+      400,
+    );
   }
 
   logProviderHttpError(response, 'NETWORK_ERROR');

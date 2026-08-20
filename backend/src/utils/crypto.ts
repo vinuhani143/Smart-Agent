@@ -48,3 +48,8 @@ export function randomUrlToken(bytes = 32): string {
 export function toPkceChallenge(verifier: string): string {
   return createHash('sha256').update(verifier).digest('base64url');
 }
+
+/** MusicMix session JWTs start with eyJ. Spotify user access tokens do not. */
+export function isLikelyJwt(value: string): boolean {
+  return /^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/.test(value.trim());
+}

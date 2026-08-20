@@ -15,10 +15,47 @@ describe('throwIfProviderError', () => {
     );
   });
 
-  it('maps 429 to rate limiting', async () => {
+  it('maps Spotify 401 search JSON to token expiration so refresh can run', async () => {
     await assert.rejects(
-      () => throwIfProviderError(new Response('{}', { status: 429, headers: { 'retry-after': '2' } })),
-      RateLimitedError,
+      () =>
+        throwIfProviderError(
+          new Response(JSON.stringify({ error: { status: 401, message: 'The access token expired' } }), {
+            status: 401,
+          }),
+        ),
+      TokenExpiredError,
+    );
+  });
+
+  it('maps Spotify 400 bearer failures to token expiration, not reconnect copy', async () => {
+    await assert.rejects(
+      () =>
+        throwIfProviderError(
+          new Response(
+            JSON.stringify({ error: { status: 400, message: 'Only valid bearer authentication supported' } }),
+            { status: 400 },
+          ),
+        ),
+      (error: Error & { code?: string }) => {
+        assert.equal(error.name, 'TokenExpiredError');
+        assert.equal(error.message.includes('rejected the request'), false);
+        return true;
+      },
+    );
+  });
+
+  it('does not treat a generic Spotify 400 as a reconnect error', async () => {
+    await assert.rejects(
+      () =>
+        throwIfProviderError(
+          new Response(JSON.stringify({ error: { status: 400, message: 'Invalid limit' } }), { status: 400 }),
+        ),
+      (error: Error & { code?: string; statusCode?: number }) => {
+        assert.equal(error.code, 'VALIDATION_ERROR');
+        assert.equal(error.statusCode, 400);
+        assert.equal(error.message.includes('rejected the request'), false);
+        return true;
+      },
     );
   });
 });

@@ -180,8 +180,8 @@ describe('spotifyAuth confidential token exchange', () => {
     assert.throws(
       () => mapSpotifyTokenError(400, { error: 'invalid_grant', error_description: 'Refresh token revoked' }),
       (error: Error & { code?: string }) => {
-        assert.equal(error.code, ErrorCode.TOKEN_INVALID);
-        assert.match(error.message, /reconnect Spotify/i);
+        assert.equal(error.code, ErrorCode.SPOTIFY_RECONNECT_REQUIRED);
+        assert.match(error.message, /Reconnect Spotify/i);
         assert.equal(error.message.includes('Refresh token revoked'), false);
         return true;
       },

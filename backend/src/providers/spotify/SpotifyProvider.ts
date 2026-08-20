@@ -1,5 +1,5 @@
 import { getEnv } from '../../config/env';
-import { AppError, ConfigurationError, TokenInvalidError } from '../../types/errors';
+import { ConfigurationError, SpotifyReconnectRequiredError, TokenInvalidError } from '../../types/errors';
 import type {
   AuthorizationRequest,
   CreatePlaylistInput,
@@ -13,7 +13,6 @@ import type {
   TrackResult,
 } from '../../types/provider';
 import { bearerHeaders, providerJson, requireAccessToken } from '../http';
-import { logger } from '../../utils/logger';
 import {
   buildAuthorizationCodeTokenRequest,
   requestSpotifyToken,
@@ -22,6 +21,7 @@ import {
   tokensFromSpotifyResponse,
   trimSpotifyEnvValue,
 } from './spotifyAuth';
+import { fetchSpotifyTrackSearch, mapSpotifySearchFailure } from './spotifyWebApi';
 
 const SPOTIFY_AUTHORIZE = 'https://accounts.spotify.com/authorize';
 const SPOTIFY_API = 'https://api.spotify.com/v1';
@@ -131,6 +131,30 @@ function applyLocalFilters(tracks: TrackResult[], params: SearchTracksParams): T
   });
 }
 
+export async function executeSpotifyTrackSearch(
+  tokens: ProviderTokens,
+  params: SearchTracksParams,
+  attempt: 'initial' | 'retry' = 'initial',
+): Promise<TrackResult[]> {
+  const accessToken = requireAccessToken(tokens.accessToken);
+  const query = buildSearchQuery(params);
+  const result = await fetchSpotifyTrackSearch({
+    accessToken,
+    query,
+    limit: params.limit,
+    offset: params.offset,
+    attempt,
+  });
+  if (result.ok) {
+    const data = result.body as SpotifySearchResponse | undefined;
+    const tracks = (data?.tracks?.items ?? [])
+      .filter((item): item is SpotifyTrack => item !== null)
+      .map(mapTrack);
+    return applyLocalFilters(tracks, params);
+  }
+  throw mapSpotifySearchFailure(result, { afterRefresh: attempt === 'retry' });
+}
+
 export class SpotifyProvider implements MusicProvider {
   readonly id: ProviderId = 'spotify';
   readonly displayName = 'Spotify';
@@ -172,11 +196,21 @@ export class SpotifyProvider implements MusicProvider {
 
   async refreshAccessToken(tokens: ProviderTokens): Promise<ProviderTokens> {
     if (!tokens.refreshToken) {
-      throw new TokenInvalidError(
-        'Your Spotify session expired. Please reconnect Spotify in Settings.',
-      );
+      throw new SpotifyReconnectRequiredError();
     }
-    const response = await requestSpotifyToken(spotifyRefreshTokenBody(tokens.refreshToken), this.tokenHeaders());
+    const response = await requestSpotifyToken(spotifyRefreshTokenBody(tokens.refreshToken), this.tokenHeaders(), {
+      grantType: 'refresh_token',
+      contentType: 'application/x-www-form-urlencoded',
+      clientIdPresent: true,
+      clientSecretPresent: true,
+      redirectUri: '',
+      redirectUriLength: 0,
+      codePresent: false,
+      codeLength: 0,
+      statePresent: false,
+      verifierPresent: false,
+      verifierLength: 0,
+    });
     return tokensFromSpotifyResponse(response, tokens.refreshToken, 'refresh_token');
   }
 
@@ -197,34 +231,7 @@ export class SpotifyProvider implements MusicProvider {
     tokens: ProviderTokens | undefined,
     params: SearchTracksParams,
   ): Promise<TrackResult[]> {
-    const accessToken = requireAccessToken(tokens?.accessToken);
-    const query = buildSearchQuery(params);
-    const url = new URL(`${SPOTIFY_API}/search`);
-    url.searchParams.set('q', query);
-    url.searchParams.set('type', 'track');
-    url.searchParams.set('limit', String(params.limit ?? 20));
-    url.searchParams.set('offset', String(params.offset ?? 0));
-
-    try {
-      const data = await providerJson<SpotifySearchResponse>(url.toString(), {
-        headers: bearerHeaders(accessToken),
-      });
-      const tracks = (data.tracks?.items ?? []).filter((item): item is SpotifyTrack => item !== null).map(mapTrack);
-      const filtered = applyLocalFilters(tracks, params);
-      logger.info('spotify search', {
-        authenticated: true,
-        httpStatus: 200,
-        resultCount: filtered.length,
-      });
-      return filtered;
-    } catch (error) {
-      logger.warn('spotify search', {
-        authenticated: true,
-        httpStatus: error instanceof AppError ? error.statusCode : undefined,
-        code: error instanceof AppError ? error.code : undefined,
-      });
-      throw error;
-    }
+    return executeSpotifyTrackSearch(tokens ?? { accessToken: '' }, params, 'initial');
   }
 
   async getTrack(tokens: ProviderTokens, providerTrackId: string): Promise<TrackResult> {

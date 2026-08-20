@@ -177,3 +177,11 @@ export class AiUnavailableError extends AppError {
     this.name = 'AiUnavailableError';
   }
 }
+
+/** True for expired provider access tokens, including AppError copies that lost `instanceof`. */
+export function isAccessTokenExpiredError(error: unknown): boolean {
+  return (
+    error instanceof TokenExpiredError ||
+    (error instanceof AppError && error.code === ErrorCode.TOKEN_EXPIRED)
+  );
+}

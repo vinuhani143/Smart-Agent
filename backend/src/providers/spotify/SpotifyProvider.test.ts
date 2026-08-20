@@ -87,4 +87,63 @@ describe('SpotifyProvider', () => {
       },
     );
   });
+
+  it('refreshes with Basic auth and without client_id in the body', async () => {
+    let tokenRequest: { url: string; auth: string | null; body: string } | undefined;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      const headers = new Headers(init?.headers);
+      const body = typeof init?.body === 'string' ? init.body : init?.body instanceof URLSearchParams ? init.body.toString() : '';
+      tokenRequest = { url, auth: headers.get('authorization'), body };
+      return new Response(
+        JSON.stringify({
+          access_token: 'rotated-access',
+          token_type: 'Bearer',
+          expires_in: 3600,
+          scope: 'user-read-email',
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }) as typeof fetch;
+
+    const tokens = await provider.refreshAccessToken({
+      accessToken: 'expired-access',
+      refreshToken: 'stored-refresh',
+    });
+    assert.equal(tokens.accessToken, 'rotated-access');
+    assert.equal(tokens.refreshToken, 'stored-refresh');
+    assert.ok(tokens.expiresAt && tokens.expiresAt.getTime() > Date.now());
+    assert.ok(tokenRequest);
+    assert.equal(tokenRequest.url, 'https://accounts.spotify.com/api/token');
+    assert.equal(tokenRequest.auth?.startsWith('Basic '), true);
+    assert.equal(tokenRequest.body.includes('grant_type=refresh_token'), true);
+    assert.equal(tokenRequest.body.includes('refresh_token=stored-refresh'), true);
+    assert.equal(tokenRequest.body.includes('client_id'), false);
+    assert.equal(tokenRequest.body.includes('spotify-client-secret'), false);
+    assert.equal(tokenRequest.body.includes('client_secret'), false);
+  });
+
+  it('maps a failed refresh to a reconnect error without leaking tokens', async () => {
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ error: 'invalid_grant', error_description: 'Refresh token revoked' }), {
+        status: 400,
+        headers: { 'content-type': 'application/json' },
+      })) as typeof fetch;
+
+    await assert.rejects(
+      () =>
+        provider.refreshAccessToken({
+          accessToken: 'expired-access',
+          refreshToken: 'secret-refresh-token-value',
+        }),
+      (error: Error & { code?: string }) => {
+        assert.equal(error.code, ErrorCode.TOKEN_INVALID);
+        assert.match(error.message, /reconnect Spotify/i);
+        assert.equal(error.message.includes('secret-refresh-token-value'), false);
+        assert.equal(error.message.includes('spotify-client-secret'), false);
+        assert.equal(error.message.includes('invalid_grant'), false);
+        return true;
+      },
+    );
+  });
 });

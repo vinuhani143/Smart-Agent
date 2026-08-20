@@ -7,7 +7,7 @@ import { createAnonymousAccount, deleteAccount, getAccountView, recoverAnonymous
 import { cleanupRemoteOperation, serializeRemoteOperation } from '../services/RemotePlaylistOperations';
 import { TokenEncryptionService } from '../services/TokenEncryptionService';
 import { disconnectMusicAccount, saveMusicAccount } from '../services/TokenService';
-import { OAuthCancelledError, OAuthFailedError } from '../types/errors';
+import { AppError, OAuthCancelledError, OAuthFailedError } from '../types/errors';
 import type { ProviderId } from '../types/provider';
 import { randomUrlToken, toPkceChallenge } from '../utils/crypto';
 import { logger } from '../utils/logger';
@@ -24,6 +24,46 @@ export function resolveOAuthProvider(param: string): ProviderId {
     return 'amazon_music';
   }
   return parseProviderId(value);
+}
+
+function redirectUriFor(providerId: ProviderId): string {
+  const env = getEnv();
+  if (providerId === 'spotify') {
+    return env.SPOTIFY_REDIRECT_URI;
+  }
+  if (providerId === 'youtube') {
+    return env.GOOGLE_REDIRECT_URI;
+  }
+  return env.AMAZON_MUSIC_REDIRECT_URI;
+}
+
+function envRedirectPath(providerId: ProviderId): string | null {
+  const raw = redirectUriFor(providerId).trim();
+  if (!raw) {
+    return null;
+  }
+  try {
+    return new URL(raw).pathname;
+  } catch {
+    return null;
+  }
+}
+
+function envRedirectIsHttps(providerId: ProviderId): boolean {
+  return redirectUriFor(providerId).startsWith('https://');
+}
+
+function oauthCallbackUserMessage(providerId: ProviderId, label: string, error: unknown): string {
+  if (error instanceof OAuthCancelledError) {
+    return error.message;
+  }
+  if (error instanceof AppError && error.expose) {
+    return error.message;
+  }
+  if (providerId === 'youtube') {
+    return 'Could not connect YouTube. Check Google OAuth credentials and try again.';
+  }
+  return `Could not connect ${label}. Confirm the redirect URI in the provider dashboard matches the server, then try again.`;
 }
 
 function oauthRedirect(status: 'success' | 'error' | 'cancelled', message?: string): string {
@@ -75,6 +115,13 @@ export async function startOAuth(req: Request, res: Response): Promise<void> {
   });
 
   const { authorizationUrl } = adapter.getAuthorizationUrl(state, codeChallenge);
+  logger.info('oauth start', {
+    provider: providerId,
+    configured: adapter.isEnabled(),
+    hasPkce: true,
+    redirectHttps: envRedirectIsHttps(providerId),
+    redirectPath: envRedirectPath(providerId),
+  });
   res.json({ authorizationUrl, provider: providerId });
 }
 
@@ -118,8 +165,15 @@ export async function oauthCallback(req: Request, res: Response): Promise<void> 
     return;
   }
 
+  logger.info('oauth callback reached', {
+    provider: requestedProvider,
+    hasCode: Boolean(code),
+    hasState: Boolean(state),
+  });
+
   const pending = await prisma.oAuthState.findUnique({ where: { state } });
   if (!pending || pending.expiresAt.getTime() < Date.now()) {
+    logger.warn('oauth callback missing state', { provider: requestedProvider, stateFound: false });
     res.redirect(oauthRedirect('error', 'This sign-in link expired. Please try again.'));
     return;
   }
@@ -137,28 +191,64 @@ export async function oauthCallback(req: Request, res: Response): Promise<void> 
 
   try {
     const adapter = requireEnabledProvider(pendingProvider);
-    const codeVerifier = pending.codeVerifier
-      ? TokenEncryptionService.decryptOrPlain(pending.codeVerifier)
-      : undefined;
+    if (!pending.codeVerifier) {
+      logger.warn('oauth callback missing verifier', { provider: pendingProvider, verifierPresent: false });
+      res.redirect(oauthRedirect('error', 'Spotify authorization is missing the PKCE verifier. Please try Connect again.'));
+      return;
+    }
+    let codeVerifier: string;
+    try {
+      codeVerifier = TokenEncryptionService.decrypt(pending.codeVerifier);
+    } catch {
+      logger.warn('oauth callback verifier decrypt failed', {
+        provider: pendingProvider,
+        verifierPresent: true,
+        verifierDecryptOk: false,
+      });
+      res.redirect(
+        oauthRedirect('error', 'Spotify authorization could not be verified. Please try Connect again.'),
+      );
+      return;
+    }
+    logger.info('oauth callback verifier', {
+      provider: pendingProvider,
+      verifierPresent: true,
+      verifierDecryptOk: true,
+      verifierLength: codeVerifier.length,
+      statePresent: true,
+      codePresent: true,
+      codeLength: code.length,
+    });
     const result = await adapter.authenticate(code, codeVerifier);
+    logger.info('oauth token exchange', {
+      provider: pendingProvider,
+      success: true,
+      hasRefreshToken: Boolean(result.refreshToken),
+    });
     await saveMusicAccount({
       userId: pending.userId,
       provider: pendingProvider,
       user: result.user,
       tokens: result,
     });
+    logger.info('oauth token stored', { provider: pendingProvider, stored: true });
     res.redirect(oauthRedirect('success', `${adapter.displayName} connected.`));
   } catch (error) {
-    logger.warn('OAuth callback failed', {
-      message: error instanceof Error ? error.message : 'unknown',
+    logger.warn('oauth callback failed', {
+      provider: requestedProvider,
+      name: error instanceof Error ? error.name : 'unknown',
+      code: error instanceof AppError ? error.code : undefined,
+      diagnosticCode:
+        error instanceof AppError && typeof error.details?.diagnosticCode === 'string'
+          ? error.details.diagnosticCode
+          : undefined,
+      spotifyError:
+        error instanceof AppError && typeof error.details?.spotifyError === 'string'
+          ? error.details.spotifyError
+          : undefined,
+      tokenStored: false,
     });
-    const message =
-      error instanceof OAuthCancelledError
-        ? error.message
-        : requestedProvider === 'youtube'
-          ? 'Could not connect YouTube. Check Google OAuth credentials and try again.'
-          : `Could not connect ${label}. Check the provider credentials and try again.`;
-    res.redirect(oauthRedirect('error', message));
+    res.redirect(oauthRedirect('error', oauthCallbackUserMessage(requestedProvider, label, error)));
   }
 }
 

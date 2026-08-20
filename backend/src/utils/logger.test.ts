@@ -21,4 +21,35 @@ describe('redactLogMeta', () => {
     assert.equal(redacted.requestId, 'req-1');
     assert.equal(redacted.statusCode, 200);
   });
+
+  it('keeps safe Spotify token-exchange diagnostics while still redacting secrets', () => {
+    const redacted = redactLogMeta({
+      clientIdPresent: true,
+      clientSecretPresent: true,
+      redirectUri: 'https://musicmix-api.onrender.com/api/auth/spotify/callback',
+      redirectUriLength: 62,
+      codePresent: true,
+      codeLength: 200,
+      statePresent: true,
+      verifierPresent: true,
+      verifierLength: 43,
+      grantType: 'authorization_code',
+      contentType: 'application/x-www-form-urlencoded',
+      authorizationScheme: 'Basic',
+      spotifyTokenStatus: 400,
+      spotifyTokenError: 'invalid_grant',
+      spotifyTokenErrorDescription: 'Invalid authorization code',
+      client_secret: 'must-not-appear',
+      code_verifier: 'must-not-appear',
+      access_token: 'must-not-appear',
+    }) as Record<string, unknown>;
+    assert.equal(redacted.clientSecretPresent, true);
+    assert.equal(redacted.authorizationScheme, 'Basic');
+    assert.equal(redacted.spotifyTokenStatus, 400);
+    assert.equal(redacted.spotifyTokenError, 'invalid_grant');
+    assert.equal(redacted.spotifyTokenErrorDescription, 'Invalid authorization code');
+    assert.equal(redacted.client_secret, '[redacted]');
+    assert.equal(redacted.code_verifier, '[redacted]');
+    assert.equal(redacted.access_token, '[redacted]');
+  });
 });

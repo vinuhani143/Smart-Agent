@@ -1,6 +1,6 @@
 import { prisma } from '../config/prisma';
 import { corsOriginList, getEnv } from '../config/env';
-import { publicProviderConfiguration } from '../services/providerStatus';
+import { describePublicRedirect, publicProviderConfiguration } from '../services/providerStatus';
 
 function describeProductionApiUrl(): string {
   const env = getEnv();
@@ -21,7 +21,10 @@ function describeProductionApiUrl(): string {
   return loopback ? 'development_loopback' : 'non_production_origin';
 }
 
-export async function health(_req: unknown, res: { json: (body: unknown) => void }): Promise<void> {
+export async function health(
+  _req: unknown,
+  res: { status: (code: number) => { json: (body: unknown) => void } },
+): Promise<void> {
   let database: 'up' | 'down' = 'down';
   try {
     await prisma.$queryRaw`SELECT 1`;
@@ -30,7 +33,7 @@ export async function health(_req: unknown, res: { json: (body: unknown) => void
     database = 'down';
   }
   const providers = publicProviderConfiguration();
-  res.json({
+  const body = {
     ok: database === 'up',
     service: 'musicmix-backend',
     database,
@@ -41,7 +44,8 @@ export async function health(_req: unknown, res: { json: (body: unknown) => void
       amazonMusic: providers.amazonMusic,
       ai: providers.ai,
     },
-  });
+  };
+  res.status(database === 'up' ? 200 : 503).json(body);
 }
 
 export async function releaseReadiness(_req: unknown, res: { json: (body: unknown) => void }): Promise<void> {
@@ -53,10 +57,14 @@ export async function releaseReadiness(_req: unknown, res: { json: (body: unknow
     database = 'down';
   }
   const providers = publicProviderConfiguration();
+  const spotifyRedirect = describePublicRedirect(getEnv().SPOTIFY_REDIRECT_URI);
   res.json({
     codeQuality: 'fixes_present_not_production_certified',
     database,
     spotifyOAuth: providers.spotify === 'configured' ? 'configured_unverified' : 'not_configured',
+    spotifyRedirectHttps: spotifyRedirect.https,
+    spotifyRedirectLocalhost: spotifyRedirect.localhost,
+    spotifyRedirectPath: spotifyRedirect.path,
     youtubeOAuth: providers.youtube === 'configured' ? 'configured_unverified' : 'not_configured',
     amazonMusic: providers.amazonMusic,
     ai: providers.ai === 'configured' ? 'configured_unverified' : 'unavailable',

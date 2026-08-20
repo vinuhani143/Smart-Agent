@@ -2,8 +2,13 @@ import { MusicAccount, MusicProviderName } from '@prisma/client';
 import { prisma } from '../config/prisma';
 import { fromPrismaProvider, getProvider, toPrismaProvider } from '../providers/ProviderRegistry';
 import { isNonRetryableProviderError } from '../providers/youtube/youtubeErrors';
-import { TokenExpiredError, TokenInvalidError } from '../types/errors';
-import type { ProviderId, ProviderTokens, ProviderUser } from '../types/provider';
+import {
+  ConfigurationError,
+  isAccessTokenExpiredError,
+  TokenInvalidError,
+} from '../types/errors';
+import type { MusicProvider, ProviderId, ProviderTokens, ProviderUser } from '../types/provider';
+import { logger } from '../utils/logger';
 import { TokenEncryptionService } from './TokenEncryptionService';
 
 export interface StoredAccount {
@@ -63,6 +68,7 @@ export async function saveMusicAccount(input: {
   tokens: ProviderTokens;
 }): Promise<MusicAccount> {
   const tokenData = persistTokenData(input.tokens);
+  const prismaProvider = toPrismaProvider(input.provider);
   const profile = {
     providerUserId: input.user.id,
     displayName: input.user.displayName,
@@ -70,23 +76,32 @@ export async function saveMusicAccount(input: {
     subscriptionTier: input.user.subscriptionTier ?? null,
   };
 
-  return prisma.musicAccount.upsert({
-    where: {
-      userId_provider: {
-        userId: input.userId,
-        provider: toPrismaProvider(input.provider),
+  return prisma.$transaction(async (tx) => {
+    await tx.musicAccount.deleteMany({
+      where: {
+        provider: prismaProvider,
+        providerUserId: input.user.id,
+        NOT: { userId: input.userId },
       },
-    },
-    create: {
-      userId: input.userId,
-      provider: toPrismaProvider(input.provider),
-      ...profile,
-      ...tokenData,
-    },
-    update: {
-      ...profile,
-      ...tokenData,
-    },
+    });
+    return tx.musicAccount.upsert({
+      where: {
+        userId_provider: {
+          userId: input.userId,
+          provider: prismaProvider,
+        },
+      },
+      create: {
+        userId: input.userId,
+        provider: prismaProvider,
+        ...profile,
+        ...tokenData,
+      },
+      update: {
+        ...profile,
+        ...tokenData,
+      },
+    });
   });
 }
 
@@ -162,11 +177,50 @@ async function persistRefreshedTokens(accountId: string, refreshed: ProviderToke
   });
 }
 
-function isExpiringSoon(tokens: ProviderTokens): boolean {
-  if (!tokens.expiresAt) {
+const REFRESH_SKEW_MS = 60_000;
+
+function reconnectProviderError(displayName: string): TokenInvalidError {
+  return new TokenInvalidError(
+    `Your ${displayName} session could not be refreshed. Please reconnect ${displayName} in Settings.`,
+  );
+}
+
+/** Refresh when expiry is unknown or within 60s. Missing expiresAt previously skipped refresh. */
+export function needsAccessTokenRefresh(tokens: ProviderTokens): boolean {
+  if (!tokens.refreshToken) {
     return false;
   }
-  return tokens.expiresAt.getTime() <= Date.now() + 60_000;
+  if (!tokens.expiresAt || Number.isNaN(tokens.expiresAt.getTime())) {
+    return true;
+  }
+  return tokens.expiresAt.getTime() <= Date.now() + REFRESH_SKEW_MS;
+}
+
+async function refreshAndPersist(
+  accountId: string,
+  adapter: MusicProvider,
+  previous: ProviderTokens,
+): Promise<ProviderTokens> {
+  if (!previous.refreshToken) {
+    throw reconnectProviderError(adapter.displayName);
+  }
+  try {
+    const refreshed = await adapter.refreshAccessToken(previous);
+    if (!refreshed.accessToken) {
+      throw reconnectProviderError(adapter.displayName);
+    }
+    await persistRefreshedTokens(accountId, refreshed, previous);
+    return refreshed;
+  } catch (error) {
+    if (
+      error instanceof TokenInvalidError ||
+      error instanceof ConfigurationError ||
+      isNonRetryableProviderError(error)
+    ) {
+      throw error;
+    }
+    throw reconnectProviderError(adapter.displayName);
+  }
 }
 
 export async function withProviderTokens<T>(
@@ -177,39 +231,37 @@ export async function withProviderTokens<T>(
   const account = await requireStoredAccount(userId, provider);
   const adapter = getProvider(provider);
   let tokens = account.tokens;
+  let refreshedOnce = false;
 
-  if (isExpiringSoon(tokens) && tokens.refreshToken) {
+  if (needsAccessTokenRefresh(tokens)) {
+    logger.info('provider token refresh', { provider, attempted: true });
     try {
-      const refreshed = await adapter.refreshAccessToken(tokens);
-      await persistRefreshedTokens(account.id, refreshed, tokens);
-      tokens = refreshed;
+      tokens = await refreshAndPersist(account.id, adapter, tokens);
+      refreshedOnce = true;
+      logger.info('provider token refresh', { provider, attempted: true, success: true });
     } catch (error) {
-      if (isNonRetryableProviderError(error)) {
-        throw error;
-      }
-      throw new TokenInvalidError(
-        `Your ${adapter.displayName} session could not be refreshed. Please reconnect.`,
-      );
+      logger.warn('provider token refresh', { provider, attempted: true, success: false });
+      throw error;
     }
   }
 
   try {
     return await operation(tokens);
   } catch (error) {
-    if (isNonRetryableProviderError(error) || !(error instanceof TokenExpiredError)) {
+    if (isNonRetryableProviderError(error) || !isAccessTokenExpiredError(error)) {
       throw error;
     }
+    if (refreshedOnce || !tokens.refreshToken) {
+      throw reconnectProviderError(adapter.displayName);
+    }
+    logger.info('provider token refresh', { provider, attempted: true, reason: 'http_401' });
     try {
-      const refreshed = await adapter.refreshAccessToken(tokens);
-      await persistRefreshedTokens(account.id, refreshed, tokens);
+      const refreshed = await refreshAndPersist(account.id, adapter, tokens);
+      logger.info('provider token refresh', { provider, attempted: true, success: true, reason: 'http_401' });
       return operation(refreshed);
-    } catch (refreshError) {
-      if (isNonRetryableProviderError(refreshError)) {
-        throw refreshError;
-      }
-      throw new TokenInvalidError(
-        `Your ${adapter.displayName} session expired and could not be refreshed. Please reconnect.`,
-      );
+    } catch (error) {
+      logger.warn('provider token refresh', { provider, attempted: true, success: false, reason: 'http_401' });
+      throw error;
     }
   }
 }

@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import { afterEach, before, describe, it } from 'node:test';
 import { resetEnvCache } from '../../config/env';
 import { ErrorCode } from '../../types/errors';
+import { buildAuthorizationCodeTokenRequest } from './spotifyAuth';
 import { SpotifyProvider } from './SpotifyProvider';
 
 const originalFetch = globalThis.fetch;
@@ -35,8 +36,23 @@ describe('SpotifyProvider', () => {
     assert.equal(url.searchParams.get('client_id'), 'spotify-client-id');
     assert.equal(url.searchParams.get('code_challenge_method'), 'S256');
     assert.equal(url.searchParams.get('code_challenge'), 'challenge-s256');
+    assert.equal(url.searchParams.get('redirect_uri'), 'http://localhost:4000/api/auth/spotify/callback');
     assert.equal(url.searchParams.has('client_secret'), false);
     assert.equal(authorizationUrl.includes('spotify-client-secret'), false);
+  });
+
+  it('uses the same trimmed redirect URI on the authorize URL and the token body', () => {
+    const { authorizationUrl } = provider.getAuthorizationUrl('oauth-state', 'challenge-s256');
+    const authorizeRedirect = new URL(authorizationUrl).searchParams.get('redirect_uri');
+    const request = buildAuthorizationCodeTokenRequest({
+      code: 'code',
+      redirectUri: authorizeRedirect ?? '',
+      codeVerifier: 'verifier',
+      clientId: 'spotify-client-id',
+      clientSecret: 'spotify-client-secret',
+    });
+    assert.equal(request.body.get('redirect_uri'), authorizeRedirect);
+    assert.equal(request.body.get('redirect_uri'), 'http://localhost:4000/api/auth/spotify/callback');
   });
 
   it('maps search results using Spotify track ids and does not invent ISRC values', async () => {
@@ -83,6 +99,125 @@ describe('SpotifyProvider', () => {
       (error: Error & { code?: string }) => {
         assert.equal(error.code, ErrorCode.TOKEN_EXPIRED);
         assert.equal(error.message.includes('spotify-access'), false);
+        return true;
+      },
+    );
+  });
+
+  it('refreshes with Basic auth and without client_id in the body', async () => {
+    let tokenRequest: { url: string; auth: string | null; body: string } | undefined;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      const headers = new Headers(init?.headers);
+      const body = typeof init?.body === 'string' ? init.body : init?.body instanceof URLSearchParams ? init.body.toString() : '';
+      tokenRequest = { url, auth: headers.get('authorization'), body };
+      return new Response(
+        JSON.stringify({
+          access_token: 'rotated-access',
+          token_type: 'Bearer',
+          expires_in: 3600,
+          scope: 'user-read-email',
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }) as typeof fetch;
+
+    const tokens = await provider.refreshAccessToken({
+      accessToken: 'expired-access',
+      refreshToken: 'stored-refresh',
+    });
+    assert.equal(tokens.accessToken, 'rotated-access');
+    assert.equal(tokens.refreshToken, 'stored-refresh');
+    assert.ok(tokens.expiresAt && tokens.expiresAt.getTime() > Date.now());
+    assert.ok(tokenRequest);
+    assert.equal(tokenRequest.url, 'https://accounts.spotify.com/api/token');
+    assert.equal(tokenRequest.auth?.startsWith('Basic '), true);
+    assert.equal(tokenRequest.body.includes('grant_type=refresh_token'), true);
+    assert.equal(tokenRequest.body.includes('refresh_token=stored-refresh'), true);
+    assert.equal(tokenRequest.body.includes('client_id'), false);
+    assert.equal(tokenRequest.body.includes('spotify-client-secret'), false);
+    assert.equal(tokenRequest.body.includes('client_secret'), false);
+  });
+
+  it('exchanges an authorization code with Basic auth, PKCE, and no client_id in the body', async () => {
+    const calls: Array<{ url: string; auth: string | null; body: string; contentType: string | null }> = [];
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      const headers = new Headers(init?.headers);
+      const body =
+        typeof init?.body === 'string'
+          ? init.body
+          : init?.body instanceof URLSearchParams
+            ? init.body.toString()
+            : '';
+      calls.push({
+        url,
+        auth: headers.get('authorization'),
+        body,
+        contentType: headers.get('content-type'),
+      });
+      if (url.includes('/api/token')) {
+        return new Response(
+          JSON.stringify({
+            access_token: 'new-access',
+            refresh_token: 'new-refresh',
+            token_type: 'Bearer',
+            expires_in: 3600,
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response(JSON.stringify({ id: 'spotify-user', display_name: 'Listener' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+
+    const result = await provider.authenticate('auth-code', 'pkce-verifier');
+    assert.equal(result.accessToken, 'new-access');
+    assert.equal(result.refreshToken, 'new-refresh');
+    assert.equal(result.user.id, 'spotify-user');
+    const tokenCall = calls.find((call) => call.url.includes('/api/token'));
+    assert.ok(tokenCall);
+    assert.equal(tokenCall.url, 'https://accounts.spotify.com/api/token');
+    assert.equal(tokenCall.contentType, 'application/x-www-form-urlencoded');
+    assert.equal(
+      tokenCall.auth,
+      `Basic ${Buffer.from('spotify-client-id:spotify-client-secret').toString('base64')}`,
+    );
+    const params = new URLSearchParams(tokenCall.body);
+    assert.deepEqual([...params.keys()], ['grant_type', 'code', 'redirect_uri', 'code_verifier']);
+    assert.equal(params.get('grant_type'), 'authorization_code');
+    assert.equal(params.get('code'), 'auth-code');
+    assert.equal(params.get('redirect_uri'), 'http://localhost:4000/api/auth/spotify/callback');
+    assert.equal(params.get('code_verifier'), 'pkce-verifier');
+    assert.equal(params.get('client_id'), null);
+    assert.equal(params.get('client_secret'), null);
+    const authorizeRedirect = new URL(
+      provider.getAuthorizationUrl('oauth-state', 'challenge-s256').authorizationUrl,
+    ).searchParams.get('redirect_uri');
+    assert.equal(params.get('redirect_uri'), authorizeRedirect);
+  });
+
+  it('maps a failed refresh to a reconnect error without leaking tokens', async () => {
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ error: 'invalid_grant', error_description: 'Refresh token revoked' }), {
+        status: 400,
+        headers: { 'content-type': 'application/json' },
+      })) as typeof fetch;
+
+    await assert.rejects(
+      () =>
+        provider.refreshAccessToken({
+          accessToken: 'expired-access',
+          refreshToken: 'secret-refresh-token-value',
+        }),
+      (error: Error & { code?: string }) => {
+        assert.equal(error.code, ErrorCode.TOKEN_INVALID);
+        assert.match(error.message, /reconnect Spotify/i);
+        assert.equal(error.message.includes('secret-refresh-token-value'), false);
+        assert.equal(error.message.includes('spotify-client-secret'), false);
+        assert.equal(error.message.includes('invalid_grant'), false);
         return true;
       },
     );

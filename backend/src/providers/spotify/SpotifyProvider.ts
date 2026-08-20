@@ -1,5 +1,5 @@
 import { getEnv } from '../../config/env';
-import { ConfigurationError, OAuthFailedError, TokenInvalidError } from '../../types/errors';
+import { AppError, ConfigurationError, TokenInvalidError } from '../../types/errors';
 import type {
   AuthorizationRequest,
   CreatePlaylistInput,
@@ -13,9 +13,17 @@ import type {
   TrackResult,
 } from '../../types/provider';
 import { bearerHeaders, providerJson, requireAccessToken } from '../http';
+import { logger } from '../../utils/logger';
+import {
+  buildAuthorizationCodeTokenRequest,
+  requestSpotifyToken,
+  spotifyBasicAuthHeader,
+  spotifyRefreshTokenBody,
+  tokensFromSpotifyResponse,
+  trimSpotifyEnvValue,
+} from './spotifyAuth';
 
 const SPOTIFY_AUTHORIZE = 'https://accounts.spotify.com/authorize';
-const SPOTIFY_TOKEN = 'https://accounts.spotify.com/api/token';
 const SPOTIFY_API = 'https://api.spotify.com/v1';
 
 const SPOTIFY_SCOPES = [
@@ -26,16 +34,6 @@ const SPOTIFY_SCOPES = [
   'playlist-modify-public',
   'playlist-modify-private',
 ].join(' ');
-
-interface SpotifyTokenResponse {
-  access_token: string;
-  token_type: string;
-  expires_in: number;
-  refresh_token?: string;
-  scope?: string;
-  error?: string;
-  error_description?: string;
-}
 
 interface SpotifyUserResponse {
   id: string;
@@ -139,7 +137,11 @@ export class SpotifyProvider implements MusicProvider {
 
   isEnabled(): boolean {
     const env = getEnv();
-    return Boolean(env.SPOTIFY_CLIENT_ID && env.SPOTIFY_CLIENT_SECRET && env.SPOTIFY_REDIRECT_URI);
+    return Boolean(
+      trimSpotifyEnvValue(env.SPOTIFY_CLIENT_ID) &&
+        trimSpotifyEnvValue(env.SPOTIFY_CLIENT_SECRET) &&
+        trimSpotifyEnvValue(env.SPOTIFY_REDIRECT_URI),
+    );
   }
 
   getAuthorizationUrl(state: string, codeChallenge?: string): AuthorizationRequest {
@@ -170,20 +172,12 @@ export class SpotifyProvider implements MusicProvider {
 
   async refreshAccessToken(tokens: ProviderTokens): Promise<ProviderTokens> {
     if (!tokens.refreshToken) {
-      throw new TokenInvalidError('Spotify did not provide a refresh token. Please reconnect.');
+      throw new TokenInvalidError(
+        'Your Spotify session expired. Please reconnect Spotify in Settings.',
+      );
     }
-    const env = this.requireConfig();
-    const body = new URLSearchParams({
-      grant_type: 'refresh_token',
-      refresh_token: tokens.refreshToken,
-      client_id: env.SPOTIFY_CLIENT_ID,
-    });
-    const response = await providerJson<SpotifyTokenResponse>(SPOTIFY_TOKEN, {
-      method: 'POST',
-      headers: this.tokenHeaders(),
-      body,
-    });
-    return this.toTokens(response, tokens.refreshToken);
+    const response = await requestSpotifyToken(spotifyRefreshTokenBody(tokens.refreshToken), this.tokenHeaders());
+    return tokensFromSpotifyResponse(response, tokens.refreshToken, 'refresh_token');
   }
 
   async getCurrentUser(tokens: ProviderTokens): Promise<ProviderUser> {
@@ -211,11 +205,26 @@ export class SpotifyProvider implements MusicProvider {
     url.searchParams.set('limit', String(params.limit ?? 20));
     url.searchParams.set('offset', String(params.offset ?? 0));
 
-    const data = await providerJson<SpotifySearchResponse>(url.toString(), {
-      headers: bearerHeaders(accessToken),
-    });
-    const tracks = (data.tracks?.items ?? []).filter((item): item is SpotifyTrack => item !== null).map(mapTrack);
-    return applyLocalFilters(tracks, params);
+    try {
+      const data = await providerJson<SpotifySearchResponse>(url.toString(), {
+        headers: bearerHeaders(accessToken),
+      });
+      const tracks = (data.tracks?.items ?? []).filter((item): item is SpotifyTrack => item !== null).map(mapTrack);
+      const filtered = applyLocalFilters(tracks, params);
+      logger.info('spotify search', {
+        authenticated: true,
+        httpStatus: 200,
+        resultCount: filtered.length,
+      });
+      return filtered;
+    } catch (error) {
+      logger.warn('spotify search', {
+        authenticated: true,
+        httpStatus: error instanceof AppError ? error.statusCode : undefined,
+        code: error instanceof AppError ? error.code : undefined,
+      });
+      throw error;
+    }
   }
 
   async getTrack(tokens: ProviderTokens, providerTrackId: string): Promise<TrackResult> {
@@ -382,52 +391,47 @@ export class SpotifyProvider implements MusicProvider {
   }
 
   private async exchangeCode(code: string, codeVerifier?: string): Promise<ProviderTokens> {
+    if (!codeVerifier) {
+      throw new TokenInvalidError(
+        'Spotify authorization is missing the PKCE verifier. Please try Connect again.',
+      );
+    }
     const env = this.requireConfig();
-    const body = new URLSearchParams({
-      grant_type: 'authorization_code',
+    const request = buildAuthorizationCodeTokenRequest({
       code,
-      redirect_uri: env.SPOTIFY_REDIRECT_URI,
-      client_id: env.SPOTIFY_CLIENT_ID,
+      redirectUri: env.SPOTIFY_REDIRECT_URI,
+      codeVerifier,
+      clientId: env.SPOTIFY_CLIENT_ID,
+      clientSecret: env.SPOTIFY_CLIENT_SECRET,
+      statePresent: true,
     });
-    if (codeVerifier) {
-      body.set('code_verifier', codeVerifier);
-    }
-    const response = await providerJson<SpotifyTokenResponse>(SPOTIFY_TOKEN, {
-      method: 'POST',
-      headers: this.tokenHeaders(),
-      body,
-    });
-    if (response.error) {
-      throw new OAuthFailedError('Spotify did not accept the authorization code.');
-    }
-    return this.toTokens(response);
+    const response = await requestSpotifyToken(request.body, request.headers, request.diagnostics);
+    return tokensFromSpotifyResponse(response, undefined, 'authorization_code');
   }
 
   private tokenHeaders(): Record<string, string> {
     const env = this.requireConfig();
-    const basic = Buffer.from(`${env.SPOTIFY_CLIENT_ID}:${env.SPOTIFY_CLIENT_SECRET}`).toString('base64');
     return {
-      Authorization: `Basic ${basic}`,
+      Authorization: spotifyBasicAuthHeader(env.SPOTIFY_CLIENT_ID, env.SPOTIFY_CLIENT_SECRET),
       'Content-Type': 'application/x-www-form-urlencoded',
-    };
-  }
-
-  private toTokens(response: SpotifyTokenResponse, fallbackRefresh?: string): ProviderTokens {
-    return {
-      accessToken: response.access_token,
-      refreshToken: response.refresh_token ?? fallbackRefresh,
-      expiresAt: new Date(Date.now() + response.expires_in * 1000),
-      scopes: response.scope,
     };
   }
 
   private requireConfig() {
     const env = getEnv();
-    if (!env.SPOTIFY_CLIENT_ID || !env.SPOTIFY_CLIENT_SECRET || !env.SPOTIFY_REDIRECT_URI) {
+    const clientId = trimSpotifyEnvValue(env.SPOTIFY_CLIENT_ID);
+    const clientSecret = trimSpotifyEnvValue(env.SPOTIFY_CLIENT_SECRET);
+    const redirectUri = trimSpotifyEnvValue(env.SPOTIFY_REDIRECT_URI);
+    if (!clientId || !clientSecret || !redirectUri) {
       throw new ConfigurationError(
         'Spotify is not configured. Set SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, and SPOTIFY_REDIRECT_URI.',
       );
     }
-    return env;
+    return {
+      ...env,
+      SPOTIFY_CLIENT_ID: clientId,
+      SPOTIFY_CLIENT_SECRET: clientSecret,
+      SPOTIFY_REDIRECT_URI: redirectUri,
+    };
   }
 }

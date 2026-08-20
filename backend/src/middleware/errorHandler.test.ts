@@ -74,4 +74,23 @@ describe('errorHandler', () => {
     assert.equal(JSON.stringify(body).includes('node_modules'), false);
     assert.equal(JSON.stringify(body).includes('Playlist'), false);
   });
+
+  it('preserves Spotify diagnostic codes without leaking tokens', () => {
+    const req = { requestId: 'req-spotify-diag' } as Request;
+    const res = mockRes();
+    const err = new AppError(ErrorCode.OAUTH_FAILED, 'Spotify rejected the authorization code (invalid_grant).', 401, {
+      diagnosticCode: 'SPOTIFY_INVALID_GRANT',
+      spotifyError: 'invalid_grant',
+      grantType: 'authorization_code',
+      refreshToken: 'should-not-leak',
+    });
+    errorHandler(err, req, res, (() => undefined) as NextFunction);
+    const body = res.body as { error: { details?: Record<string, unknown> } };
+    assert.deepEqual(body.error.details, {
+      diagnosticCode: 'SPOTIFY_INVALID_GRANT',
+      spotifyError: 'invalid_grant',
+      grantType: 'authorization_code',
+    });
+    assert.equal(JSON.stringify(body).includes('should-not-leak'), false);
+  });
 });

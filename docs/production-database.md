@@ -5,7 +5,7 @@ Do **not** run destructive migrations automatically. Use `npx prisma migrate dep
 | Topic | Requirement |
 | --- | --- |
 | Engine | PostgreSQL (Prisma datasource) |
-| URL | `DATABASE_URL` with TLS: `sslmode=require` or `sslmode=verify-full` |
+| URL | `DATABASE_URL` with TLS: `sslmode=require` or `sslmode=verify-full`. In production, MusicMix appends `sslmode=require` if the provider omitted it (e.g. some Render URLs). The URL is never logged. |
 | Localhost | Forbidden in production startup |
 | Migrations | Deterministic SQL under `prisma/migrations/`. Apply forward-only with `migrate deploy`. |
 | Pooling | Prefer a pooler (PgBouncer transaction mode) or `connection_limit` on the URL. Prisma opens a small process pool; size it to the host. Example query param: `connection_limit=5`. |

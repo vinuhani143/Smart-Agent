@@ -191,9 +191,34 @@ export async function oauthCallback(req: Request, res: Response): Promise<void> 
 
   try {
     const adapter = requireEnabledProvider(pendingProvider);
-    const codeVerifier = pending.codeVerifier
-      ? TokenEncryptionService.decryptOrPlain(pending.codeVerifier)
-      : undefined;
+    if (!pending.codeVerifier) {
+      logger.warn('oauth callback missing verifier', { provider: pendingProvider, verifierPresent: false });
+      res.redirect(oauthRedirect('error', 'Spotify authorization is missing the PKCE verifier. Please try Connect again.'));
+      return;
+    }
+    let codeVerifier: string;
+    try {
+      codeVerifier = TokenEncryptionService.decrypt(pending.codeVerifier);
+    } catch {
+      logger.warn('oauth callback verifier decrypt failed', {
+        provider: pendingProvider,
+        verifierPresent: true,
+        verifierDecryptOk: false,
+      });
+      res.redirect(
+        oauthRedirect('error', 'Spotify authorization could not be verified. Please try Connect again.'),
+      );
+      return;
+    }
+    logger.info('oauth callback verifier', {
+      provider: pendingProvider,
+      verifierPresent: true,
+      verifierDecryptOk: true,
+      verifierLength: codeVerifier.length,
+      statePresent: true,
+      codePresent: true,
+      codeLength: code.length,
+    });
     const result = await adapter.authenticate(code, codeVerifier);
     logger.info('oauth token exchange', {
       provider: pendingProvider,
@@ -213,6 +238,14 @@ export async function oauthCallback(req: Request, res: Response): Promise<void> 
       provider: requestedProvider,
       name: error instanceof Error ? error.name : 'unknown',
       code: error instanceof AppError ? error.code : undefined,
+      diagnosticCode:
+        error instanceof AppError && typeof error.details?.diagnosticCode === 'string'
+          ? error.details.diagnosticCode
+          : undefined,
+      spotifyError:
+        error instanceof AppError && typeof error.details?.spotifyError === 'string'
+          ? error.details.spotifyError
+          : undefined,
       tokenStored: false,
     });
     res.redirect(oauthRedirect('error', oauthCallbackUserMessage(requestedProvider, label, error)));

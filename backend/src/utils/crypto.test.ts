@@ -15,9 +15,8 @@ describe('encryptSecret', () => {
 });
 
 describe('toPkceChallenge', () => {
-  it('produces an S256 challenge', () => {
-    const challenge = toPkceChallenge('dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk');
-    assert.ok(challenge.length > 20);
-    assert.notEqual(challenge, 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk');
+  it('RFC 7636 Appendix B: SHA256(code_verifier) then base64url', () => {
+    const verifier = 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk';
+    assert.equal(toPkceChallenge(verifier), 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM');
   });
 });

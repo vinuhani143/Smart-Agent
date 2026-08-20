@@ -15,11 +15,12 @@ import type {
 import { bearerHeaders, providerJson, requireAccessToken } from '../http';
 import { logger } from '../../utils/logger';
 import {
+  buildAuthorizationCodeTokenRequest,
   requestSpotifyToken,
-  spotifyAuthorizationCodeBody,
   spotifyBasicAuthHeader,
   spotifyRefreshTokenBody,
   tokensFromSpotifyResponse,
+  trimSpotifyEnvValue,
 } from './spotifyAuth';
 
 const SPOTIFY_AUTHORIZE = 'https://accounts.spotify.com/authorize';
@@ -136,7 +137,11 @@ export class SpotifyProvider implements MusicProvider {
 
   isEnabled(): boolean {
     const env = getEnv();
-    return Boolean(env.SPOTIFY_CLIENT_ID && env.SPOTIFY_CLIENT_SECRET && env.SPOTIFY_REDIRECT_URI);
+    return Boolean(
+      trimSpotifyEnvValue(env.SPOTIFY_CLIENT_ID) &&
+        trimSpotifyEnvValue(env.SPOTIFY_CLIENT_SECRET) &&
+        trimSpotifyEnvValue(env.SPOTIFY_REDIRECT_URI),
+    );
   }
 
   getAuthorizationUrl(state: string, codeChallenge?: string): AuthorizationRequest {
@@ -386,15 +391,21 @@ export class SpotifyProvider implements MusicProvider {
   }
 
   private async exchangeCode(code: string, codeVerifier?: string): Promise<ProviderTokens> {
+    if (!codeVerifier) {
+      throw new TokenInvalidError(
+        'Spotify authorization is missing the PKCE verifier. Please try Connect again.',
+      );
+    }
     const env = this.requireConfig();
-    const response = await requestSpotifyToken(
-      spotifyAuthorizationCodeBody({
-        code,
-        redirectUri: env.SPOTIFY_REDIRECT_URI,
-        codeVerifier,
-      }),
-      this.tokenHeaders(),
-    );
+    const request = buildAuthorizationCodeTokenRequest({
+      code,
+      redirectUri: env.SPOTIFY_REDIRECT_URI,
+      codeVerifier,
+      clientId: env.SPOTIFY_CLIENT_ID,
+      clientSecret: env.SPOTIFY_CLIENT_SECRET,
+      statePresent: true,
+    });
+    const response = await requestSpotifyToken(request.body, request.headers, request.diagnostics);
     return tokensFromSpotifyResponse(response, undefined, 'authorization_code');
   }
 
@@ -408,11 +419,19 @@ export class SpotifyProvider implements MusicProvider {
 
   private requireConfig() {
     const env = getEnv();
-    if (!env.SPOTIFY_CLIENT_ID || !env.SPOTIFY_CLIENT_SECRET || !env.SPOTIFY_REDIRECT_URI) {
+    const clientId = trimSpotifyEnvValue(env.SPOTIFY_CLIENT_ID);
+    const clientSecret = trimSpotifyEnvValue(env.SPOTIFY_CLIENT_SECRET);
+    const redirectUri = trimSpotifyEnvValue(env.SPOTIFY_REDIRECT_URI);
+    if (!clientId || !clientSecret || !redirectUri) {
       throw new ConfigurationError(
         'Spotify is not configured. Set SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, and SPOTIFY_REDIRECT_URI.',
       );
     }
-    return env;
+    return {
+      ...env,
+      SPOTIFY_CLIENT_ID: clientId,
+      SPOTIFY_CLIENT_SECRET: clientSecret,
+      SPOTIFY_REDIRECT_URI: redirectUri,
+    };
   }
 }

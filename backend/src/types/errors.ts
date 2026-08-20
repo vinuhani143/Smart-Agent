@@ -44,8 +44,8 @@ export class AppError extends Error {
 }
 
 export class ConfigurationError extends AppError {
-  constructor(message: string) {
-    super(ErrorCode.CONFIGURATION_ERROR, message, 503);
+  constructor(message: string, details?: Record<string, unknown>) {
+    super(ErrorCode.CONFIGURATION_ERROR, message, 503, details);
     this.name = 'ConfigurationError';
   }
 }
@@ -58,8 +58,8 @@ export class ProviderUnavailableError extends AppError {
 }
 
 export class OAuthFailedError extends AppError {
-  constructor(message = 'Connecting your music account failed. Please try again.') {
-    super(ErrorCode.OAUTH_FAILED, message, 401);
+  constructor(message = 'Connecting your music account failed. Please try again.', details?: Record<string, unknown>) {
+    super(ErrorCode.OAUTH_FAILED, message, 401, details);
     this.name = 'OAuthFailedError';
   }
 }

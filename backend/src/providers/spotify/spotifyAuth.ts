@@ -15,16 +15,57 @@ export interface SpotifyTokenResponse {
   error_description?: string;
 }
 
+export type SpotifyTokenGrant = 'authorization_code' | 'refresh_token';
+
+export type SpotifyOAuthErrorCode =
+  | 'invalid_client'
+  | 'invalid_grant'
+  | 'invalid_request'
+  | 'unauthorized_client'
+  | 'unsupported_grant_type';
+
 const RECONNECT_SPOTIFY =
   'Your Spotify session could not be refreshed. Please reconnect Spotify in Settings.';
 
-export type SpotifyTokenGrant = 'authorization_code' | 'refresh_token';
+export interface SpotifyTokenRequestDiagnostics {
+  clientIdPresent: boolean;
+  clientSecretPresent: boolean;
+  redirectUri: string;
+  redirectUriLength: number;
+  codePresent: boolean;
+  codeLength: number;
+  statePresent: boolean;
+  verifierPresent: boolean;
+  verifierLength: number;
+  grantType: SpotifyTokenGrant;
+  contentType: 'application/x-www-form-urlencoded';
+}
 
-const CONNECT_SPOTIFY =
-  'Spotify did not accept the authorization code. Confirm SPOTIFY_REDIRECT_URI matches the Spotify Dashboard exactly, then try Connect again.';
+export interface SpotifyAuthorizationCodeRequest {
+  method: 'POST';
+  url: string;
+  headers: {
+    Authorization: string;
+    'Content-Type': 'application/x-www-form-urlencoded';
+  };
+  body: URLSearchParams;
+  bodyKeys: string[];
+  diagnostics: SpotifyTokenRequestDiagnostics & {
+    bodyHasClientId: boolean;
+    bodyHasClientSecret: boolean;
+    authorizationScheme: 'Basic';
+    clientIdHadWhitespace: boolean;
+    clientSecretHadWhitespace: boolean;
+    redirectUriHadWhitespace: boolean;
+  };
+}
+
+export function trimSpotifyEnvValue(value: string): string {
+  return value.trim();
+}
 
 export function spotifyBasicAuthHeader(clientId: string, clientSecret: string): string {
-  return `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`;
+  return `Basic ${Buffer.from(`${trimSpotifyEnvValue(clientId)}:${trimSpotifyEnvValue(clientSecret)}`).toString('base64')}`;
 }
 
 /**
@@ -46,7 +87,7 @@ export function spotifyAuthorizationCodeBody(input: {
   const body = new URLSearchParams({
     grant_type: 'authorization_code',
     code: input.code,
-    redirect_uri: input.redirectUri,
+    redirect_uri: trimSpotifyEnvValue(input.redirectUri),
   });
   if (input.codeVerifier) {
     body.set('code_verifier', input.codeVerifier);
@@ -54,21 +95,127 @@ export function spotifyAuthorizationCodeBody(input: {
   return body;
 }
 
+/** Single construction path for the authorization-code token request. */
+export function buildAuthorizationCodeTokenRequest(input: {
+  code: string;
+  redirectUri: string;
+  codeVerifier: string;
+  clientId: string;
+  clientSecret: string;
+  statePresent?: boolean;
+}): SpotifyAuthorizationCodeRequest {
+  const clientId = trimSpotifyEnvValue(input.clientId);
+  const clientSecret = trimSpotifyEnvValue(input.clientSecret);
+  const redirectUri = trimSpotifyEnvValue(input.redirectUri);
+  const body = spotifyAuthorizationCodeBody({
+    code: input.code,
+    redirectUri,
+    codeVerifier: input.codeVerifier,
+  });
+  const headers = {
+    Authorization: spotifyBasicAuthHeader(clientId, clientSecret),
+    'Content-Type': 'application/x-www-form-urlencoded' as const,
+  };
+  return {
+    method: 'POST',
+    url: SPOTIFY_TOKEN_URL,
+    headers,
+    body,
+    bodyKeys: [...body.keys()],
+    diagnostics: {
+      clientIdPresent: clientId.length > 0,
+      clientSecretPresent: clientSecret.length > 0,
+      redirectUri,
+      redirectUriLength: redirectUri.length,
+      codePresent: input.code.length > 0,
+      codeLength: input.code.length,
+      statePresent: input.statePresent ?? false,
+      verifierPresent: input.codeVerifier.length > 0,
+      verifierLength: input.codeVerifier.length,
+      grantType: 'authorization_code',
+      contentType: 'application/x-www-form-urlencoded',
+      bodyHasClientId: body.has('client_id'),
+      bodyHasClientSecret: body.has('client_secret'),
+      authorizationScheme: 'Basic',
+      clientIdHadWhitespace: input.clientId !== clientId,
+      clientSecretHadWhitespace: input.clientSecret !== clientSecret,
+      redirectUriHadWhitespace: input.redirectUri !== redirectUri,
+    },
+  };
+}
+
+function asSpotifyOAuthError(value: string | undefined): SpotifyOAuthErrorCode | undefined {
+  if (
+    value === 'invalid_client' ||
+    value === 'invalid_grant' ||
+    value === 'invalid_request' ||
+    value === 'unauthorized_client' ||
+    value === 'unsupported_grant_type'
+  ) {
+    return value;
+  }
+  return undefined;
+}
+
+function safeErrorDescription(description: string | undefined): string | undefined {
+  if (!description) {
+    return undefined;
+  }
+  if (description.length > 180) {
+    return undefined;
+  }
+  if (/access_token|refresh_token|client_secret|code_verifier|bearer\s+[a-z0-9]/i.test(description)) {
+    return undefined;
+  }
+  return description;
+}
+
 export function mapSpotifyTokenError(
   status: number,
   body: SpotifyTokenResponse | undefined,
   grantType: SpotifyTokenGrant = 'refresh_token',
 ): never {
-  const code = typeof body?.error === 'string' ? body.error : undefined;
-  if (code === 'invalid_client') {
+  const spotifyError = asSpotifyOAuthError(typeof body?.error === 'string' ? body.error : undefined);
+  const details = {
+    diagnosticCode: spotifyError ? `SPOTIFY_${spotifyError.toUpperCase()}` : 'SPOTIFY_TOKEN_ERROR',
+    spotifyError: spotifyError ?? 'unknown',
+    grantType,
+    httpStatus: status,
+  };
+
+  if (spotifyError === 'invalid_client' || spotifyError === 'unauthorized_client') {
     throw new ConfigurationError(
-      'Spotify rejected the server credentials. Check SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET.',
+      `Spotify rejected the server credentials (${spotifyError}). Check SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET for whitespace.`,
+      details,
     );
   }
+
   if (grantType === 'authorization_code') {
-    throw new OAuthFailedError(CONNECT_SPOTIFY);
+    if (spotifyError === 'invalid_grant') {
+      throw new OAuthFailedError(
+        'Spotify rejected the authorization code (invalid_grant). The code may be expired or already used, or the redirect URI / PKCE verifier did not match. Try Connect again.',
+        details,
+      );
+    }
+    if (spotifyError === 'invalid_request') {
+      throw new OAuthFailedError(
+        'Spotify rejected the token request (invalid_request). The token body must not include client_id when Basic authentication is used. Try Connect again.',
+        details,
+      );
+    }
+    if (spotifyError === 'unsupported_grant_type') {
+      throw new OAuthFailedError(
+        'Spotify rejected the token grant type (unsupported_grant_type).',
+        details,
+      );
+    }
+    throw new OAuthFailedError(
+      `Spotify did not accept the authorization code (${details.spotifyError}). Try Connect again.`,
+      details,
+    );
   }
-  if (code === 'invalid_grant' || code === 'invalid_token') {
+
+  if (spotifyError === 'invalid_grant' || body?.error === 'invalid_token') {
     throw new TokenInvalidError(RECONNECT_SPOTIFY);
   }
   if (status === 400 || status === 401) {
@@ -76,7 +223,7 @@ export function mapSpotifyTokenError(
       'Your Spotify session is no longer valid. Please reconnect Spotify in Settings.',
     );
   }
-  throw new OAuthFailedError('Spotify did not accept the authorization request.');
+  throw new OAuthFailedError('Spotify did not accept the authorization request.', details);
 }
 
 export function tokensFromSpotifyResponse(
@@ -99,14 +246,34 @@ export function tokensFromSpotifyResponse(
 
 /**
  * POST to Spotify's token endpoint without the Google/YouTube error mapper.
- * Never logs access tokens, refresh tokens, or the client secret.
+ * Never logs access tokens, refresh tokens, client secret, code, or verifier.
  */
 export async function requestSpotifyToken(
   body: URLSearchParams,
   headers: Record<string, string>,
+  diagnostics?: Partial<SpotifyTokenRequestDiagnostics> & Record<string, unknown>,
 ): Promise<SpotifyTokenResponse> {
   const grantType: SpotifyTokenGrant =
     body.get('grant_type') === 'authorization_code' ? 'authorization_code' : 'refresh_token';
+  logger.info('spotify token request', {
+    clientIdPresent: diagnostics?.clientIdPresent ?? null,
+    clientSecretPresent: diagnostics?.clientSecretPresent ?? null,
+    redirectUri: diagnostics?.redirectUri ?? null,
+    redirectUriLength: diagnostics?.redirectUriLength ?? diagnostics?.redirectUri?.length ?? null,
+    codePresent: diagnostics?.codePresent ?? body.has('code'),
+    codeLength: diagnostics?.codeLength ?? null,
+    statePresent: diagnostics?.statePresent ?? null,
+    verifierPresent: diagnostics?.verifierPresent ?? body.has('code_verifier'),
+    verifierLength: diagnostics?.verifierLength ?? null,
+    grantType,
+    contentType: 'application/x-www-form-urlencoded',
+    bodyHasClientId: body.has('client_id'),
+    bodyHasClientSecret: body.has('client_secret'),
+    authorizationScheme: headers.Authorization?.startsWith('Basic ') ? 'Basic' : 'none',
+    clientIdHadWhitespace: diagnostics?.clientIdHadWhitespace ?? null,
+    clientSecretHadWhitespace: diagnostics?.clientSecretHadWhitespace ?? null,
+    redirectUriHadWhitespace: diagnostics?.redirectUriHadWhitespace ?? null,
+  });
   const response = await providerFetch(SPOTIFY_TOKEN_URL, {
     method: 'POST',
     headers,
@@ -119,13 +286,13 @@ export async function requestSpotifyToken(
   } catch {
     parsed = undefined;
   }
-  const errorCode = typeof parsed?.error === 'string' ? parsed.error : undefined;
-  logger.info('spotify token exchange', {
+  const spotifyTokenError = typeof parsed?.error === 'string' ? parsed.error : undefined;
+  logger.info('spotify token response', {
     grantType,
-    configured: true,
-    httpStatus: response.status,
+    spotifyTokenStatus: response.status,
+    spotifyTokenError: spotifyTokenError ?? null,
+    spotifyTokenErrorDescription: safeErrorDescription(parsed?.error_description) ?? null,
     ok: response.ok,
-    errorCode: errorCode ?? null,
   });
   if (!response.ok) {
     mapSpotifyTokenError(response.status, parsed, grantType);

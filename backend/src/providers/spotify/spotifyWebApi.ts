@@ -68,7 +68,7 @@ function safeSpotifyWebApiErrorField(value: string | undefined): string | undefi
   if (value.length > 180) {
     return undefined;
   }
-  if (/access_token|refresh_token|client_secret|code_verifier|bearer\s+[a-z0-9]/i.test(value)) {
+  if (/access_token|refresh_token|client_secret|code_verifier|bearer\s+[A-Za-z0-9._~+/-]{8,}/i.test(value)) {
     return undefined;
   }
   return value;
@@ -87,6 +87,7 @@ export interface SpotifySearchHttpResult {
   body: unknown;
   error: string | undefined;
   errorDescription: string | undefined;
+  rawMessage: string;
 }
 
 async function spotifySearchFetch(url: string, headers: Record<string, string>): Promise<Response> {
@@ -108,7 +109,11 @@ async function spotifySearchFetch(url: string, headers: Record<string, string>):
   }
 }
 
-function searchErrorFields(body: unknown): { error: string | undefined; errorDescription: string | undefined } {
+function searchErrorFields(body: unknown): {
+  error: string | undefined;
+  errorDescription: string | undefined;
+  rawMessage: string;
+} {
   const parsed = spotifyWebApiMessage(body);
   const stringError =
     body && typeof body === 'object' && typeof (body as { error?: unknown }).error === 'string'
@@ -118,9 +123,11 @@ function searchErrorFields(body: unknown): { error: string | undefined; errorDes
     body && typeof body === 'object' && typeof (body as { error_description?: unknown }).error_description === 'string'
       ? String((body as { error_description: string }).error_description)
       : parsed.message;
+  const rawMessage = stringError ?? parsed.message ?? description ?? '';
   return {
     error: safeSpotifyWebApiErrorField(stringError ?? parsed.message),
     errorDescription: safeSpotifyWebApiErrorField(description),
+    rawMessage,
   };
 }
 
@@ -164,6 +171,7 @@ export async function fetchSpotifyTrackSearch(input: {
     body,
     error: fields.error,
     errorDescription: fields.errorDescription,
+    rawMessage: fields.rawMessage,
   };
 }
 
@@ -171,7 +179,7 @@ export function mapSpotifySearchFailure(
   result: SpotifySearchHttpResult,
   options?: { afterRefresh?: boolean },
 ): AppError {
-  const message = result.error ?? result.errorDescription ?? '';
+  const message = result.rawMessage || result.error || result.errorDescription || '';
   if (isSpotifyAuthSearchStatus(result.status, message)) {
     if (options?.afterRefresh) {
       return new SpotifyInvalidTokenError();

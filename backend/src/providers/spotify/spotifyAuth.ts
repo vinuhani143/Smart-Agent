@@ -1,4 +1,8 @@
-import { ConfigurationError, OAuthFailedError, TokenInvalidError } from '../../types/errors';
+import {
+  ConfigurationError,
+  OAuthFailedError,
+  SpotifyReconnectRequiredError,
+} from '../../types/errors';
 import type { ProviderTokens } from '../../types/provider';
 import { logger } from '../../utils/logger';
 import { providerFetch } from '../http';
@@ -23,9 +27,6 @@ export type SpotifyOAuthErrorCode =
   | 'invalid_request'
   | 'unauthorized_client'
   | 'unsupported_grant_type';
-
-const RECONNECT_SPOTIFY =
-  'Your Spotify session could not be refreshed. Please reconnect Spotify in Settings.';
 
 export interface SpotifyTokenRequestDiagnostics {
   clientIdPresent: boolean;
@@ -215,12 +216,10 @@ export function mapSpotifyTokenError(
   }
 
   if (spotifyError === 'invalid_grant' || body?.error === 'invalid_token') {
-    throw new TokenInvalidError(RECONNECT_SPOTIFY);
+    throw new SpotifyReconnectRequiredError();
   }
   if (status === 400 || status === 401) {
-    throw new TokenInvalidError(
-      'Your Spotify session is no longer valid. Please reconnect Spotify in Settings.',
-    );
+    throw new SpotifyReconnectRequiredError();
   }
   throw new OAuthFailedError('Spotify did not accept the authorization request.', details);
 }

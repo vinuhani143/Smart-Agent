@@ -213,8 +213,8 @@ describe('SpotifyProvider', () => {
           refreshToken: 'secret-refresh-token-value',
         }),
       (error: Error & { code?: string }) => {
-        assert.equal(error.code, ErrorCode.TOKEN_INVALID);
-        assert.match(error.message, /reconnect Spotify/i);
+        assert.equal(error.code, ErrorCode.SPOTIFY_RECONNECT_REQUIRED);
+        assert.match(error.message, /Reconnect Spotify/i);
         assert.equal(error.message.includes('secret-refresh-token-value'), false);
         assert.equal(error.message.includes('spotify-client-secret'), false);
         assert.equal(error.message.includes('invalid_grant'), false);

@@ -5,10 +5,12 @@ import { isNonRetryableProviderError } from '../providers/youtube/youtubeErrors'
 import {
   ConfigurationError,
   isAccessTokenExpiredError,
+  SpotifyReconnectRequiredError,
   TokenInvalidError,
 } from '../types/errors';
 import type { MusicProvider, ProviderId, ProviderTokens, ProviderUser } from '../types/provider';
 import { logger } from '../utils/logger';
+import { isLikelyJwt } from '../utils/crypto';
 import { TokenEncryptionService } from './TokenEncryptionService';
 
 export interface StoredAccount {
@@ -18,14 +20,20 @@ export interface StoredAccount {
   displayName?: string;
   imageUrl?: string;
   tokens: ProviderTokens;
+  accessTokenDecryptOk: boolean;
+  refreshTokenDecryptOk: boolean;
 }
 
 function encrypt(value: string): string {
   return TokenEncryptionService.encrypt(value);
 }
 
-function decrypt(value: string): string {
-  return TokenEncryptionService.decrypt(value);
+function tryDecrypt(value: string): { ok: true; value: string } | { ok: false } {
+  try {
+    return { ok: true, value: TokenEncryptionService.decrypt(value) };
+  } catch {
+    return { ok: false };
+  }
 }
 
 export function toPublicAccount(account: {
@@ -138,15 +146,19 @@ export async function getStoredAccount(
   if (!account) {
     return null;
   }
+  const access = tryDecrypt(account.accessToken);
+  const refresh = account.refreshToken ? tryDecrypt(account.refreshToken) : { ok: true as const, value: undefined };
   return {
     id: account.id,
     provider,
     providerUserId: account.providerUserId,
     displayName: account.displayName ?? undefined,
     imageUrl: account.imageUrl ?? undefined,
+    accessTokenDecryptOk: access.ok,
+    refreshTokenDecryptOk: refresh.ok,
     tokens: {
-      accessToken: decrypt(account.accessToken),
-      refreshToken: account.refreshToken ? decrypt(account.refreshToken) : undefined,
+      accessToken: access.ok ? access.value : '',
+      refreshToken: refresh.ok ? refresh.value : undefined,
       expiresAt: account.expiresAt ?? undefined,
       scopes: account.scopes ?? undefined,
     },
@@ -179,16 +191,22 @@ async function persistRefreshedTokens(accountId: string, refreshed: ProviderToke
 
 const REFRESH_SKEW_MS = 60_000;
 
-function reconnectProviderError(displayName: string): TokenInvalidError {
+function reconnectProviderError(displayName: string): TokenInvalidError | SpotifyReconnectRequiredError {
+  if (displayName === 'Spotify') {
+    return new SpotifyReconnectRequiredError();
+  }
   return new TokenInvalidError(
     `Your ${displayName} session could not be refreshed. Please reconnect ${displayName} in Settings.`,
   );
 }
 
-/** Refresh when expiry is unknown or within 60s. Missing expiresAt previously skipped refresh. */
+/** Refresh when expiry is unknown, token decrypt failed, token looks like a JWT, or within 60s. */
 export function needsAccessTokenRefresh(tokens: ProviderTokens): boolean {
   if (!tokens.refreshToken) {
     return false;
+  }
+  if (!tokens.accessToken || isLikelyJwt(tokens.accessToken)) {
+    return true;
   }
   if (!tokens.expiresAt || Number.isNaN(tokens.expiresAt.getTime())) {
     return true;
@@ -232,9 +250,34 @@ export async function withProviderTokens<T>(
   const adapter = getProvider(provider);
   let tokens = account.tokens;
   let refreshedOnce = false;
+  const accessExpired =
+    !account.accessTokenDecryptOk ||
+    isLikelyJwt(tokens.accessToken) ||
+    needsAccessTokenRefresh(tokens);
 
-  if (needsAccessTokenRefresh(tokens)) {
-    logger.info('provider token refresh', { provider, attempted: true });
+  if (provider === 'spotify') {
+    logger.info('spotify search auth', {
+      musicAccountExists: true,
+      provider,
+      musicMixUserIdPresent: Boolean(userId),
+      spotifyAccountIdPresent: Boolean(account.providerUserId),
+      accessTokenPresent: account.accessTokenDecryptOk && tokens.accessToken.length > 0,
+      accessTokenLength: account.accessTokenDecryptOk ? tokens.accessToken.length : 0,
+      refreshTokenPresent: account.refreshTokenDecryptOk && Boolean(tokens.refreshToken),
+      expiresAt: tokens.expiresAt?.toISOString() ?? null,
+      accessTokenExpired: accessExpired,
+      accessTokenDecryptOk: account.accessTokenDecryptOk,
+      refreshTokenDecryptOk: account.refreshTokenDecryptOk,
+      sameUserOwnsAccount: true,
+    });
+  }
+
+  if (!account.accessTokenDecryptOk || isLikelyJwt(tokens.accessToken) || needsAccessTokenRefresh(tokens)) {
+    logger.info('provider token refresh', {
+      provider,
+      attempted: true,
+      reason: !account.accessTokenDecryptOk ? 'access_decrypt_failed' : 'expired_or_missing',
+    });
     try {
       tokens = await refreshAndPersist(account.id, adapter, tokens);
       refreshedOnce = true;

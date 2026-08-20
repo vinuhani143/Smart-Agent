@@ -1,5 +1,5 @@
 import { getEnv } from '../../config/env';
-import { AppError, ConfigurationError, TokenInvalidError } from '../../types/errors';
+import { AppError, ConfigurationError, SpotifyReconnectRequiredError, TokenExpiredError, TokenInvalidError } from '../../types/errors';
 import type {
   AuthorizationRequest,
   CreatePlaylistInput,
@@ -14,6 +14,7 @@ import type {
 } from '../../types/provider';
 import { bearerHeaders, providerJson, requireAccessToken } from '../http';
 import { logger } from '../../utils/logger';
+import { isLikelyJwt } from '../../utils/crypto';
 import {
   buildAuthorizationCodeTokenRequest,
   requestSpotifyToken,
@@ -22,6 +23,7 @@ import {
   tokensFromSpotifyResponse,
   trimSpotifyEnvValue,
 } from './spotifyAuth';
+import { spotifyUserBearerHeaders } from './spotifyWebApi';
 
 const SPOTIFY_AUTHORIZE = 'https://accounts.spotify.com/authorize';
 const SPOTIFY_API = 'https://api.spotify.com/v1';
@@ -172,11 +174,21 @@ export class SpotifyProvider implements MusicProvider {
 
   async refreshAccessToken(tokens: ProviderTokens): Promise<ProviderTokens> {
     if (!tokens.refreshToken) {
-      throw new TokenInvalidError(
-        'Your Spotify session expired. Please reconnect Spotify in Settings.',
-      );
+      throw new SpotifyReconnectRequiredError();
     }
-    const response = await requestSpotifyToken(spotifyRefreshTokenBody(tokens.refreshToken), this.tokenHeaders());
+    const response = await requestSpotifyToken(spotifyRefreshTokenBody(tokens.refreshToken), this.tokenHeaders(), {
+      grantType: 'refresh_token',
+      contentType: 'application/x-www-form-urlencoded',
+      clientIdPresent: true,
+      clientSecretPresent: true,
+      redirectUri: '',
+      redirectUriLength: 0,
+      codePresent: false,
+      codeLength: 0,
+      statePresent: false,
+      verifierPresent: false,
+      verifierLength: 0,
+    });
     return tokensFromSpotifyResponse(response, tokens.refreshToken, 'refresh_token');
   }
 
@@ -198,16 +210,28 @@ export class SpotifyProvider implements MusicProvider {
     params: SearchTracksParams,
   ): Promise<TrackResult[]> {
     const accessToken = requireAccessToken(tokens?.accessToken);
+    if (isLikelyJwt(accessToken)) {
+      throw new TokenExpiredError();
+    }
     const query = buildSearchQuery(params);
     const url = new URL(`${SPOTIFY_API}/search`);
     url.searchParams.set('q', query);
     url.searchParams.set('type', 'track');
     url.searchParams.set('limit', String(params.limit ?? 20));
     url.searchParams.set('offset', String(params.offset ?? 0));
+    const headers = spotifyUserBearerHeaders(accessToken);
+    logger.info('spotify search request', {
+      searchQuery: query,
+      spotifyEndpoint: `${SPOTIFY_API}/search`,
+      authorizationScheme: headers.Authorization.startsWith('Bearer ') ? 'Bearer' : 'none',
+      usedMusicMixJwt: false,
+      accessTokenPresent: accessToken.length > 0,
+      accessTokenLength: accessToken.length,
+    });
 
     try {
       const data = await providerJson<SpotifySearchResponse>(url.toString(), {
-        headers: bearerHeaders(accessToken),
+        headers,
       });
       const tracks = (data.tracks?.items ?? []).filter((item): item is SpotifyTrack => item !== null).map(mapTrack);
       const filtered = applyLocalFilters(tracks, params);

@@ -86,7 +86,8 @@ export function SearchScreen() {
       search.error instanceof ApiClientError &&
       (search.error.status === 401 ||
         search.error.code === 'TOKEN_INVALID' ||
-        search.error.code === 'TOKEN_EXPIRED');
+        search.error.code === 'TOKEN_EXPIRED' ||
+        search.error.code === 'SPOTIFY_RECONNECT_REQUIRED');
     body = (
       <ErrorState
         title={reconnect ? 'Reconnect required' : 'Search failed'}

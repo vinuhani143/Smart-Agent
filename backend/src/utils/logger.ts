@@ -26,6 +26,20 @@ const SAFE_DIAGNOSTIC_KEYS = new Set([
   'spotifyTokenErrorDescription',
   'diagnosticCode',
   'spotifyError',
+  'musicAccountExists',
+  'musicMixUserIdPresent',
+  'spotifyAccountIdPresent',
+  'accessTokenPresent',
+  'accessTokenLength',
+  'refreshTokenPresent',
+  'accessTokenExpired',
+  'accessTokenDecryptOk',
+  'refreshTokenDecryptOk',
+  'searchQuery',
+  'spotifyEndpoint',
+  'usedMusicMixJwt',
+  'sameUserOwnsAccount',
+  'expiresAt',
 ]);
 
 export function redactLogMeta(value: unknown): unknown {

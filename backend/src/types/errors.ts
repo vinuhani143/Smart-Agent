@@ -3,6 +3,7 @@ export const ErrorCode = {
   OAUTH_CANCELLED: 'OAUTH_CANCELLED',
   TOKEN_EXPIRED: 'TOKEN_EXPIRED',
   TOKEN_INVALID: 'TOKEN_INVALID',
+  SPOTIFY_RECONNECT_REQUIRED: 'SPOTIFY_RECONNECT_REQUIRED',
   RATE_LIMITED: 'RATE_LIMITED',
   QUOTA_EXCEEDED: 'QUOTA_EXCEEDED',
   NETWORK_ERROR: 'NETWORK_ERROR',
@@ -82,6 +83,15 @@ export class TokenInvalidError extends AppError {
   constructor(message = 'The music-service session is no longer valid. Please reconnect.') {
     super(ErrorCode.TOKEN_INVALID, message, 401);
     this.name = 'TokenInvalidError';
+  }
+}
+
+export class SpotifyReconnectRequiredError extends AppError {
+  constructor(message = 'Reconnect Spotify.') {
+    super(ErrorCode.SPOTIFY_RECONNECT_REQUIRED, message, 401, {
+      diagnosticCode: 'SPOTIFY_RECONNECT_REQUIRED',
+    });
+    this.name = 'SpotifyReconnectRequiredError';
   }
 }
 
@@ -193,7 +203,10 @@ export function isProviderAuthError(error: unknown): boolean {
   }
   return (
     error instanceof TokenInvalidError ||
+    error instanceof SpotifyReconnectRequiredError ||
     (error instanceof AppError &&
-      (error.code === ErrorCode.TOKEN_INVALID || error.code === ErrorCode.UNAUTHORIZED))
+      (error.code === ErrorCode.TOKEN_INVALID ||
+        error.code === ErrorCode.UNAUTHORIZED ||
+        error.code === ErrorCode.SPOTIFY_RECONNECT_REQUIRED))
   );
 }

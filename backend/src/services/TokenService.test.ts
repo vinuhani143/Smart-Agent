@@ -207,4 +207,26 @@ describe('withProviderTokens Spotify refresh', () => {
       },
     );
   });
+
+  it('moves an existing Spotify identity onto the current MusicMix user', async () => {
+    const first = await createAnonymousAccount();
+    const second = await createAnonymousAccount();
+    userIds.push(first.userId, second.userId);
+    await saveMusicAccount({
+      userId: first.userId,
+      provider: 'spotify',
+      user: { id: 'same-spotify-user', displayName: 'Listener' },
+      tokens: { accessToken: 'first-access', refreshToken: 'first-refresh', expiresAt: new Date(Date.now() + 3600_000) },
+    });
+    await saveMusicAccount({
+      userId: second.userId,
+      provider: 'spotify',
+      user: { id: 'same-spotify-user', displayName: 'Listener' },
+      tokens: { accessToken: 'second-access', refreshToken: 'second-refresh', expiresAt: new Date(Date.now() + 3600_000) },
+    });
+    assert.equal(await getStoredAccount(first.userId, 'spotify'), null);
+    const moved = await getStoredAccount(second.userId, 'spotify');
+    assert.equal(moved?.tokens.accessToken, 'second-access');
+    assert.equal(moved?.providerUserId, 'same-spotify-user');
+  });
 });

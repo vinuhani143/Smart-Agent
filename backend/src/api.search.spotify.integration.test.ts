@@ -274,4 +274,67 @@ describe('GET /api/search/spotify', () => {
     assert.equal(String(error.message).toLowerCase().includes('search failed'), false);
     assertNoSecrets(raw);
   });
+
+  it('searches Spotify for arijit singh with a valid access token', async () => {
+    const session = await createSession();
+    await connectSpotify(session.userId, {
+      accessToken: 'valid-access',
+      refreshToken: 'stored-refresh',
+      expiresAt: new Date(Date.now() + 30 * 60 * 1000),
+    });
+    installSpotifyFetchMock((url, init) => {
+      assert.equal(url.includes('/api/token'), false);
+      assert.match(url, /q=arijit(\+|%20)singh/i);
+      const headers = new Headers(init?.headers);
+      assert.equal(headers.get('authorization'), 'Bearer valid-access');
+      return jsonResponse(200, {
+        tracks: {
+          items: [
+            {
+              id: 'arijit-1',
+              name: 'Tum Hi Ho',
+              duration_ms: 261000,
+              explicit: false,
+              artists: [{ name: 'Arijit Singh' }],
+              album: { name: 'Aashiqui 2' },
+            },
+          ],
+        },
+      });
+    });
+
+    const { status, body, raw } = await json(`/api/search/spotify?q=${encodeURIComponent('arijit singh')}`, {
+      headers: { Authorization: `Bearer ${session.token}` },
+    });
+    assert.equal(status, 200, raw);
+    const tracks = body.tracks as Array<Record<string, unknown>>;
+    assert.equal(tracks.length, 1);
+    assert.equal(tracks[0]?.artist, 'Arijit Singh');
+    assertNoSecrets(raw);
+  });
+
+  it('returns reconnect 401 instead of empty-result 404 on GET /api/search when refresh fails', async () => {
+    const session = await createSession();
+    await connectSpotify(session.userId, {
+      accessToken: 'expired-access',
+      refreshToken: 'secret-refresh-token-value',
+      expiresAt: new Date(Date.now() - 60_000),
+    });
+    installSpotifyFetchMock((url) => {
+      if (url.includes('/api/token')) {
+        return jsonResponse(400, { error: 'invalid_grant' });
+      }
+      return jsonResponse(500, { error: 'search should not run' });
+    });
+
+    const { status, body, raw } = await json(`/api/search?q=${encodeURIComponent('arijit singh')}`, {
+      headers: { Authorization: `Bearer ${session.token}` },
+    });
+    assert.equal(status, 401, raw);
+    const error = body.error as Record<string, unknown>;
+    assert.equal(error.code, 'TOKEN_INVALID');
+    assert.match(String(error.message), /reconnect Spotify/i);
+    assert.equal(String(error.message).toLowerCase().includes('no songs matched'), false);
+    assertNoSecrets(raw);
+  });
 });

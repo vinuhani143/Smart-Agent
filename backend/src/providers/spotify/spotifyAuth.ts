@@ -1,5 +1,6 @@
 import { ConfigurationError, OAuthFailedError, TokenInvalidError } from '../../types/errors';
 import type { ProviderTokens } from '../../types/provider';
+import { logger } from '../../utils/logger';
 import { providerFetch } from '../http';
 
 export const SPOTIFY_TOKEN_URL = 'https://accounts.spotify.com/api/token';
@@ -16,6 +17,11 @@ export interface SpotifyTokenResponse {
 
 const RECONNECT_SPOTIFY =
   'Your Spotify session could not be refreshed. Please reconnect Spotify in Settings.';
+
+export type SpotifyTokenGrant = 'authorization_code' | 'refresh_token';
+
+const CONNECT_SPOTIFY =
+  'Spotify did not accept the authorization code. Confirm SPOTIFY_REDIRECT_URI matches the Spotify Dashboard exactly, then try Connect again.';
 
 export function spotifyBasicAuthHeader(clientId: string, clientSecret: string): string {
   return `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`;
@@ -35,14 +41,12 @@ export function spotifyRefreshTokenBody(refreshToken: string): URLSearchParams {
 export function spotifyAuthorizationCodeBody(input: {
   code: string;
   redirectUri: string;
-  clientId: string;
   codeVerifier?: string;
 }): URLSearchParams {
   const body = new URLSearchParams({
     grant_type: 'authorization_code',
     code: input.code,
     redirect_uri: input.redirectUri,
-    client_id: input.clientId,
   });
   if (input.codeVerifier) {
     body.set('code_verifier', input.codeVerifier);
@@ -50,15 +54,22 @@ export function spotifyAuthorizationCodeBody(input: {
   return body;
 }
 
-export function mapSpotifyTokenError(status: number, body: SpotifyTokenResponse | undefined): never {
+export function mapSpotifyTokenError(
+  status: number,
+  body: SpotifyTokenResponse | undefined,
+  grantType: SpotifyTokenGrant = 'refresh_token',
+): never {
   const code = typeof body?.error === 'string' ? body.error : undefined;
-  if (code === 'invalid_grant' || code === 'invalid_token') {
-    throw new TokenInvalidError(RECONNECT_SPOTIFY);
-  }
   if (code === 'invalid_client') {
     throw new ConfigurationError(
       'Spotify rejected the server credentials. Check SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET.',
     );
+  }
+  if (grantType === 'authorization_code') {
+    throw new OAuthFailedError(CONNECT_SPOTIFY);
+  }
+  if (code === 'invalid_grant' || code === 'invalid_token') {
+    throw new TokenInvalidError(RECONNECT_SPOTIFY);
   }
   if (status === 400 || status === 401) {
     throw new TokenInvalidError(
@@ -71,11 +82,12 @@ export function mapSpotifyTokenError(status: number, body: SpotifyTokenResponse 
 export function tokensFromSpotifyResponse(
   response: SpotifyTokenResponse,
   fallbackRefresh?: string,
+  grantType: SpotifyTokenGrant = 'refresh_token',
 ): ProviderTokens {
   const accessToken = response.access_token;
   const expiresIn = response.expires_in;
   if (response.error || !accessToken || typeof expiresIn !== 'number' || !Number.isFinite(expiresIn)) {
-    mapSpotifyTokenError(400, response);
+    mapSpotifyTokenError(400, response, grantType);
   }
   return {
     accessToken: accessToken as string,
@@ -93,6 +105,8 @@ export async function requestSpotifyToken(
   body: URLSearchParams,
   headers: Record<string, string>,
 ): Promise<SpotifyTokenResponse> {
+  const grantType: SpotifyTokenGrant =
+    body.get('grant_type') === 'authorization_code' ? 'authorization_code' : 'refresh_token';
   const response = await providerFetch(SPOTIFY_TOKEN_URL, {
     method: 'POST',
     headers,
@@ -105,8 +119,16 @@ export async function requestSpotifyToken(
   } catch {
     parsed = undefined;
   }
+  const errorCode = typeof parsed?.error === 'string' ? parsed.error : undefined;
+  logger.info('spotify token exchange', {
+    grantType,
+    configured: true,
+    httpStatus: response.status,
+    ok: response.ok,
+    errorCode: errorCode ?? null,
+  });
   if (!response.ok) {
-    mapSpotifyTokenError(response.status, parsed);
+    mapSpotifyTokenError(response.status, parsed, grantType);
   }
   if (!parsed) {
     throw new OAuthFailedError('Spotify did not return a token response.');

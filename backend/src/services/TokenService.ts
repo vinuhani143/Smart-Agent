@@ -8,6 +8,7 @@ import {
   TokenInvalidError,
 } from '../types/errors';
 import type { MusicProvider, ProviderId, ProviderTokens, ProviderUser } from '../types/provider';
+import { logger } from '../utils/logger';
 import { TokenEncryptionService } from './TokenEncryptionService';
 
 export interface StoredAccount {
@@ -67,6 +68,7 @@ export async function saveMusicAccount(input: {
   tokens: ProviderTokens;
 }): Promise<MusicAccount> {
   const tokenData = persistTokenData(input.tokens);
+  const prismaProvider = toPrismaProvider(input.provider);
   const profile = {
     providerUserId: input.user.id,
     displayName: input.user.displayName,
@@ -74,23 +76,32 @@ export async function saveMusicAccount(input: {
     subscriptionTier: input.user.subscriptionTier ?? null,
   };
 
-  return prisma.musicAccount.upsert({
-    where: {
-      userId_provider: {
-        userId: input.userId,
-        provider: toPrismaProvider(input.provider),
+  return prisma.$transaction(async (tx) => {
+    await tx.musicAccount.deleteMany({
+      where: {
+        provider: prismaProvider,
+        providerUserId: input.user.id,
+        NOT: { userId: input.userId },
       },
-    },
-    create: {
-      userId: input.userId,
-      provider: toPrismaProvider(input.provider),
-      ...profile,
-      ...tokenData,
-    },
-    update: {
-      ...profile,
-      ...tokenData,
-    },
+    });
+    return tx.musicAccount.upsert({
+      where: {
+        userId_provider: {
+          userId: input.userId,
+          provider: prismaProvider,
+        },
+      },
+      create: {
+        userId: input.userId,
+        provider: prismaProvider,
+        ...profile,
+        ...tokenData,
+      },
+      update: {
+        ...profile,
+        ...tokenData,
+      },
+    });
   });
 }
 
@@ -223,8 +234,15 @@ export async function withProviderTokens<T>(
   let refreshedOnce = false;
 
   if (needsAccessTokenRefresh(tokens)) {
-    tokens = await refreshAndPersist(account.id, adapter, tokens);
-    refreshedOnce = true;
+    logger.info('provider token refresh', { provider, attempted: true });
+    try {
+      tokens = await refreshAndPersist(account.id, adapter, tokens);
+      refreshedOnce = true;
+      logger.info('provider token refresh', { provider, attempted: true, success: true });
+    } catch (error) {
+      logger.warn('provider token refresh', { provider, attempted: true, success: false });
+      throw error;
+    }
   }
 
   try {
@@ -236,8 +254,15 @@ export async function withProviderTokens<T>(
     if (refreshedOnce || !tokens.refreshToken) {
       throw reconnectProviderError(adapter.displayName);
     }
-    const refreshed = await refreshAndPersist(account.id, adapter, tokens);
-    return operation(refreshed);
+    logger.info('provider token refresh', { provider, attempted: true, reason: 'http_401' });
+    try {
+      const refreshed = await refreshAndPersist(account.id, adapter, tokens);
+      logger.info('provider token refresh', { provider, attempted: true, success: true, reason: 'http_401' });
+      return operation(refreshed);
+    } catch (error) {
+      logger.warn('provider token refresh', { provider, attempted: true, success: false, reason: 'http_401' });
+      throw error;
+    }
   }
 }
 

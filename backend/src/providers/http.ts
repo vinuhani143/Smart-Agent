@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger';
 import {
   ConflictError,
   InsufficientPermissionsError,
@@ -61,6 +62,7 @@ export async function throwIfProviderError(response: Response): Promise<void> {
 
   const mapped = mapGoogleApiError(response.status, body);
   if (mapped) {
+    logProviderHttpError(response, mapped.code);
     throw mapped;
   }
 
@@ -68,25 +70,42 @@ export async function throwIfProviderError(response: Response): Promise<void> {
   const retryAfterSeconds = retryAfter ? Number.parseInt(retryAfter, 10) : undefined;
 
   if (response.status === 401) {
+    logProviderHttpError(response, 'TOKEN_EXPIRED');
     throw new TokenExpiredError();
   }
   if (response.status === 403) {
+    logProviderHttpError(response, 'INSUFFICIENT_PERMISSIONS');
     throw new InsufficientPermissionsError();
   }
   if (response.status === 404) {
+    logProviderHttpError(response, 'NOT_FOUND');
     throw new NotFoundError('That item was not found on the music service.');
   }
   if (response.status === 429) {
+    logProviderHttpError(response, 'RATE_LIMITED');
     throw new RateLimitedError(Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : undefined);
   }
   if (response.status === 409) {
+    logProviderHttpError(response, 'CONFLICT');
     throw new ConflictError('The music service reported a conflict. Refresh and try again.');
   }
   if (response.status === 400) {
+    logProviderHttpError(response, 'TOKEN_INVALID');
     throw new TokenInvalidError('The music service rejected the request. Please reconnect the account.');
   }
 
+  logProviderHttpError(response, 'NETWORK_ERROR');
   throw new NetworkError(`The music service returned HTTP ${response.status}.`);
+}
+
+function logProviderHttpError(response: Response, code: string): void {
+  let host: string | undefined;
+  try {
+    host = response.url ? new URL(response.url).host : undefined;
+  } catch {
+    host = undefined;
+  }
+  logger.warn('provider http error', { httpStatus: response.status, host, code });
 }
 
 export function bearerHeaders(accessToken: string, extra?: Record<string, string>): Record<string, string> {
